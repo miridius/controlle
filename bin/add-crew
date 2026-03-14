@@ -1,0 +1,262 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# add-crew: Auto-setup a new crew member in Controlle.
+#
+# Creates Telegram forum topic, updates gateway config, installs hooks.
+#
+# Usage: bin/add-crew <name> [--rig <rig>] [--session <session>]
+#
+# Examples:
+#   bin/add-crew emma                    # defaults: rig=controlle, session=co-crew-emma
+#   bin/add-crew alan --rig meerkat --session mk-crew-alan
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_DIR="$(dirname "$SCRIPT_DIR")"
+CONFIG_FILE="${REPO_DIR}/gateway.config.json"
+
+# --- Parse args ---
+NAME=""
+RIG="controlle"
+SESSION=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --rig)    RIG="$2"; shift 2 ;;
+    --session) SESSION="$2"; shift 2 ;;
+    -h|--help)
+      echo "Usage: bin/add-crew <name> [--rig <rig>] [--session <session>]"
+      echo ""
+      echo "Sets up a new crew member in Controlle:"
+      echo "  1. Creates Telegram forum topic"
+      echo "  2. Adds entry to gateway.config.json"
+      echo "  3. Installs SessionStart hook and tg-ack script"
+      echo ""
+      echo "Options:"
+      echo "  --rig <rig>         Rig name (default: controlle)"
+      echo "  --session <session> Session ID (default: <rig-prefix>-crew-<name>)"
+      exit 0
+      ;;
+    -*) echo "Unknown option: $1" >&2; exit 1 ;;
+    *)
+      if [[ -z "$NAME" ]]; then
+        NAME="$1"
+      else
+        echo "Unexpected argument: $1" >&2; exit 1
+      fi
+      shift
+      ;;
+  esac
+done
+
+if [[ -z "$NAME" ]]; then
+  echo "Error: crew member name required" >&2
+  echo "Usage: bin/add-crew <name> [--rig <rig>] [--session <session>]" >&2
+  exit 1
+fi
+
+# Derive defaults
+RIG_PREFIX="${RIG:0:2}"
+if [[ -z "$SESSION" ]]; then
+  SESSION="${RIG_PREFIX}-crew-${NAME}"
+fi
+TOPIC_LABEL="crew/${NAME}"
+PROJECT_DIR="-gt-${RIG}-crew-${NAME}"
+CREW_DIR="/gt/${RIG}/crew/${NAME}"
+
+# --- Validate ---
+
+# Check gateway config exists
+if [[ ! -f "$CONFIG_FILE" ]]; then
+  echo "Error: gateway config not found at ${CONFIG_FILE}" >&2
+  exit 1
+fi
+
+# Check topic doesn't already exist in config
+if grep -q "\"${TOPIC_LABEL}\"" "$CONFIG_FILE"; then
+  echo "Error: topic '${TOPIC_LABEL}' already exists in gateway config" >&2
+  exit 1
+fi
+
+# Need the bot token
+BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
+if [[ -z "$BOT_TOKEN" && -f "$REPO_DIR/.env" ]]; then
+  # Source from .env file
+  set -a && source "$REPO_DIR/.env" && set +a
+  BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
+fi
+if [[ -z "$BOT_TOKEN" ]]; then
+  echo "Error: TELEGRAM_BOT_TOKEN not set. Set it in .env or as an environment variable." >&2
+  exit 1
+fi
+
+# Get supergroup chat_id from config
+CHAT_ID=$(grep -oP '"supergroup_chat_id":\s*\K-?[0-9]+' "$CONFIG_FILE")
+if [[ -z "$CHAT_ID" ]]; then
+  echo "Error: couldn't read supergroup_chat_id from config" >&2
+  exit 1
+fi
+
+echo "==> Setting up crew member: ${NAME}"
+echo "    Rig: ${RIG}"
+echo "    Session: ${SESSION}"
+echo "    Topic: ${TOPIC_LABEL}"
+echo "    Project dir: ${PROJECT_DIR}"
+echo ""
+
+# --- Step 1: Create Telegram forum topic ---
+echo "[1/4] Creating Telegram forum topic '${TOPIC_LABEL}'..."
+
+RESPONSE=$(curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/createForumTopic" \
+  -H "Content-Type: application/json" \
+  -d "{\"chat_id\": ${CHAT_ID}, \"name\": \"${TOPIC_LABEL}\"}")
+
+if echo "$RESPONSE" | grep -q '"ok":true'; then
+  THREAD_ID=$(echo "$RESPONSE" | grep -oP '"message_thread_id":\s*\K[0-9]+')
+  echo "    Created topic with thread_id: ${THREAD_ID}"
+else
+  ERROR=$(echo "$RESPONSE" | grep -oP '"description":\s*"\K[^"]+' || echo "$RESPONSE")
+  echo "Error: Failed to create forum topic: ${ERROR}" >&2
+  exit 1
+fi
+
+# --- Step 2: Update gateway.config.json ---
+echo "[2/4] Adding entry to gateway.config.json..."
+
+# Use bun to safely update JSON (avoids sed/jq dependency issues)
+bun -e "
+const fs = require('fs');
+const config = JSON.parse(fs.readFileSync('${CONFIG_FILE}', 'utf-8'));
+config.topics['${TOPIC_LABEL}'] = {
+  thread_id: ${THREAD_ID},
+  session: '${SESSION}',
+  agent_log: true,
+  project_dir: '${PROJECT_DIR}'
+};
+fs.writeFileSync('${CONFIG_FILE}', JSON.stringify(config, null, 2) + '\n');
+"
+echo "    Updated gateway.config.json"
+
+# --- Step 3: Install bin scripts for crew member ---
+echo "[3/4] Installing bin/ scripts for ${CREW_DIR}..."
+
+mkdir -p "${CREW_DIR}/bin"
+
+# Create start-controlle.sh (SessionStart hook script)
+cat > "${CREW_DIR}/bin/start-controlle.sh" <<STARTEOF
+#!/usr/bin/env bash
+# SessionStart hook: start Controlle gateway and inject context.
+
+WORKDIR="${CREW_DIR}"
+RUNTIME="\${WORKDIR}/.runtime"
+PIDFILE="\${RUNTIME}/controlle.pid"
+mkdir -p "\${RUNTIME}"
+
+# Start Controlle if not already running
+start_controlle() {
+  cd "${REPO_DIR}"
+  TELEGRAM_BOT_TOKEN="${BOT_TOKEN}" \\
+    nohup bun run --watch src/index.ts > "\${RUNTIME}/controlle.log" 2>&1 &
+  echo \$! > "\$PIDFILE"
+}
+
+if [[ -f "\$PIDFILE" ]]; then
+  pid=\$(cat "\$PIDFILE")
+  if kill -0 "\$pid" 2>/dev/null; then
+    :
+  else
+    start_controlle
+  fi
+else
+  start_controlle
+fi
+
+# Inject context
+cat <<'EOF'
+Controlle gateway is running. Dave communicates via Telegram in the Gas Town supergroup.
+His messages arrive as nudges. The ${TOPIC_LABEL} topic (thread ${THREAD_ID}) routes to this session.
+
+Your full transcript is streamed to Telegram via agent-log. Just respond normally — Dave sees everything.
+Do NOT use tg-group for manual replies. Agent-log IS the outbound channel.
+Ack messages with: bin/tg-ack <msg_id>
+EOF
+STARTEOF
+chmod +x "${CREW_DIR}/bin/start-controlle.sh"
+
+# Create tg-ack script
+cat > "${CREW_DIR}/bin/tg-ack" <<ACKEOF
+#!/usr/bin/env bash
+# Acknowledge a Telegram message with an eyes reaction.
+# Usage: tg-ack <message_id>
+curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/setMessageReaction" \\
+  -H "Content-Type: application/json" \\
+  -d "{\"chat_id\": ${CHAT_ID}, \"message_id\": \$1, \"reaction\": [{\"type\": \"emoji\", \"emoji\": \"👀\"}]}" > /dev/null
+ACKEOF
+chmod +x "${CREW_DIR}/bin/tg-ack"
+
+echo "    Installed start-controlle.sh and tg-ack"
+
+# --- Step 4: Set up SessionStart hook ---
+echo "[4/4] Configuring SessionStart hook..."
+
+CLAUDE_DIR="${CREW_DIR}/.claude"
+SETTINGS_FILE="${CLAUDE_DIR}/settings.json"
+mkdir -p "$CLAUDE_DIR"
+
+if [[ -f "$SETTINGS_FILE" ]]; then
+  # Merge hook into existing settings using bun
+  bun -e "
+const fs = require('fs');
+const settings = JSON.parse(fs.readFileSync('${SETTINGS_FILE}', 'utf-8'));
+if (!settings.hooks) settings.hooks = {};
+if (!settings.hooks.SessionStart) settings.hooks.SessionStart = [];
+
+const hookEntry = {
+  matcher: '',
+  hooks: [{ type: 'command', command: '${CREW_DIR}/bin/start-controlle.sh' }]
+};
+
+// Check if hook already exists
+const exists = settings.hooks.SessionStart.some(e =>
+  e.hooks?.some(h => h.command?.includes('start-controlle'))
+);
+
+if (!exists) {
+  settings.hooks.SessionStart.push(hookEntry);
+  fs.writeFileSync('${SETTINGS_FILE}', JSON.stringify(settings, null, 2) + '\n');
+  console.log('    Added SessionStart hook to existing settings.json');
+} else {
+  console.log('    SessionStart hook already exists, skipping');
+}
+"
+else
+  cat > "$SETTINGS_FILE" <<SETEOF
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CREW_DIR}/bin/start-controlle.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
+SETEOF
+  echo "    Created settings.json with SessionStart hook"
+fi
+
+echo ""
+echo "==> Done! Crew member '${NAME}' is set up."
+echo ""
+echo "    Topic:     ${TOPIC_LABEL} (thread ${THREAD_ID})"
+echo "    Session:   ${SESSION}"
+echo "    Config:    ${CONFIG_FILE}"
+echo "    Hook:      ${CREW_DIR}/bin/start-controlle.sh"
+echo ""
+echo "Next steps:"
+echo "  1. Restart Controlle to pick up the new config"
+echo "  2. Start the crew session: gt crew start ${NAME}"

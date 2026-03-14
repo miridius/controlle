@@ -1,0 +1,26 @@
+{
+  "$schema": "https://raw.githubusercontent.com/stryker-mutator/stryker/master/packages/core/schema/stryker-core.schema.json",
+  "mutate": [
+    "src/**/*.ts",
+    "!src/__tests__/**",
+    "!src/index.ts"
+  ],
+  "testRunner": "command",
+  "commandRunner": {
+    "command": "bun test"
+  },
+  "checkers": ["typescript"],
+  "tsconfigFile": "tsconfig.json",
+  "reporters": ["clear-text", "json"],
+  "jsonReporter": {
+    "fileName": "reports/mutation/mutation.json"
+  },
+  "thresholds": {
+    "high": 80,
+    "low": 60,
+    "break": 50
+  },
+  "concurrency": 2,
+  "timeoutMS": 30000,
+  "tempDirName": ".stryker-tmp"
+}

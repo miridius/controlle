@@ -1,0 +1,25 @@
+{
+  "$schema": "./gateway.schema.json",
+  "supergroup_chat_id": -1001234567890,
+  "topics": {
+    "mayor": {
+      "thread_id": 1,
+      "session": "hq-mayor",
+      "agent_log": true,
+      "project_dir": "-gt-mayor"
+    },
+    "escalations": {
+      "thread_id": 2
+    },
+    "mail_inbox": {
+      "thread_id": 3
+    },
+    "crew/sam": {
+      "thread_id": 4,
+      "session": "co-crew-sam",
+      "rig": "controlle",
+      "agent_log": true,
+      "project_dir": "-gt-controlle-crew-sam"
+    }
+  }
+}

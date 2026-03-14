@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# verify-markdown: Empirically test MarkdownV2 rendering through Telegram API.
+#
+# Sends a test message with known markdown formatting to a Telegram topic,
+# then inspects the API response for expected entities (bold, code, etc).
+#
+# Usage:
+#   bin/verify-markdown              # Send to escalations topic (default)
+#   bin/verify-markdown <thread_id>  # Send to a specific topic
+#   bin/verify-markdown --dry-run    # Show what would be sent, don't send
+#
+# Requires: TELEGRAM_BOT_TOKEN env var, jq
+#
+# Exit code: 0 = all entity checks passed, 1 = one or more failed
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_DIR="$(dirname "$SCRIPT_DIR")"
+CONFIG_FILE="${REPO_DIR}/gateway.config.json"
+
+# --- Parse args ---
+DRY_RUN=false
+THREAD_ID=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dry-run) DRY_RUN=true; shift ;;
+    *)         THREAD_ID="$1"; shift ;;
+  esac
+done
+
+# --- Validate deps ---
+if ! command -v jq &>/dev/null; then
+  echo "FAIL: jq is required but not found in PATH" >&2
+  exit 1
+fi
+
+if [[ -z "${TELEGRAM_BOT_TOKEN:-}" ]]; then
+  echo "FAIL: TELEGRAM_BOT_TOKEN env var is not set" >&2
+  exit 1
+fi
+
+# --- Load config ---
+CHAT_ID=$(jq -r '.supergroup_chat_id' "$CONFIG_FILE")
+
+if [[ -z "$THREAD_ID" ]]; then
+  THREAD_ID=$(jq -r '.topics.escalations.thread_id' "$CONFIG_FILE")
+fi
+
+TELEGRAM_API="https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}"
+
+# --- Build test message ---
+# MarkdownV2 requires escaping special chars outside of formatting spans.
+# We use known formatting that exercises bold, italic, code, and code_block.
+TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+TEST_MESSAGE="*verify\\-markdown* test at \`${TIMESTAMP}\`
+
+_Italic line_ with \`inline code\`\\.
+
+\`\`\`
+code block line 1
+code block line 2
+\`\`\`
+
+Expected entities: bold, italic, code, pre\\."
+
+# --- Dry run ---
+if $DRY_RUN; then
+  echo "=== Dry Run ==="
+  echo "Chat ID:   $CHAT_ID"
+  echo "Thread ID: $THREAD_ID"
+  echo "Parse mode: MarkdownV2"
+  echo ""
+  echo "--- Message ---"
+  echo "$TEST_MESSAGE"
+  exit 0
+fi
+
+# --- Send message ---
+echo "Sending test message to thread $THREAD_ID..."
+
+RESPONSE=$(curl -s -X POST "${TELEGRAM_API}/sendMessage" \
+  -H "Content-Type: application/json" \
+  -d "$(jq -n \
+    --argjson chat_id "$CHAT_ID" \
+    --argjson thread_id "$THREAD_ID" \
+    --arg text "$TEST_MESSAGE" \
+    '{
+      chat_id: $chat_id,
+      message_thread_id: $thread_id,
+      text: $text,
+      parse_mode: "MarkdownV2"
+    }')")
+
+# --- Check API response ---
+OK=$(echo "$RESPONSE" | jq -r '.ok')
+if [[ "$OK" != "true" ]]; then
+  DESC=$(echo "$RESPONSE" | jq -r '.description // "unknown error"')
+  echo "FAIL: Telegram API rejected the message: $DESC" >&2
+  echo ""
+  echo "Response:"
+  echo "$RESPONSE" | jq . 2>/dev/null || echo "$RESPONSE"
+  exit 1
+fi
+
+MSG_ID=$(echo "$RESPONSE" | jq -r '.result.message_id')
+echo "Message sent: msg_id=$MSG_ID"
+
+# --- Check entities ---
+ENTITIES=$(echo "$RESPONSE" | jq -r '[.result.entities[]?.type] | sort | unique | .[]' 2>/dev/null || true)
+
+PASS=0
+FAIL=0
+TOTAL=0
+
+check_entity() {
+  local expected="$1"
+  TOTAL=$((TOTAL + 1))
+  if echo "$ENTITIES" | grep -qx "$expected"; then
+    echo "  PASS: $expected entity found"
+    PASS=$((PASS + 1))
+  else
+    echo "  FAIL: $expected entity NOT found"
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+echo ""
+echo "Checking entities..."
+check_entity "bold"
+check_entity "italic"
+check_entity "code"
+check_entity "pre"
+
+echo ""
+echo "--- Entity Summary ---"
+echo "All entities: $(echo "$RESPONSE" | jq -c '[.result.entities[]?.type]' 2>/dev/null || echo '[]')"
+echo "Results: $PASS/$TOTAL passed"
+
+if [[ $FAIL -gt 0 ]]; then
+  echo ""
+  echo "FAIL: $FAIL entity check(s) failed"
+  exit 1
+fi
+
+echo ""
+echo "PASS: All markdown entities rendered correctly"
+exit 0

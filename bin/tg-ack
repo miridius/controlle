@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Acknowledge a Telegram message with an eyes reaction.
+# Usage: tg-ack <message_id>
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_DIR="$(dirname "$SCRIPT_DIR")"
+# Source .env for credentials if not already set
+[[ -z "${TELEGRAM_BOT_TOKEN:-}" && -f "$REPO_DIR/.env" ]] && set -a && source "$REPO_DIR/.env" && set +a
+CHAT_ID="${SUPERGROUP_CHAT_ID:-$(grep -oP '"supergroup_chat_id":\s*\K-?[0-9]+' "$REPO_DIR/gateway.config.json" 2>/dev/null)}"
+curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setMessageReaction" \
+  -H "Content-Type: application/json" \
+  -d "{\"chat_id\": ${CHAT_ID}, \"message_id\": $1, \"reaction\": [{\"type\": \"emoji\", \"emoji\": \"👀\"}]}" > /dev/null
