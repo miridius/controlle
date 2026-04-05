@@ -1,0 +1,146 @@
+#!/usr/bin/env bun
+/**
+ * CLI for sending messages to Telegram from GT hooks/scripts.
+ *
+ * Usage:
+ *   bun run src/outbound-cli.ts escalation <severity> <id> <description> [source]
+ *   bun run src/outbound-cli.ts mail <mail-id> <from> <subject> <body>
+ *   bun run src/outbound-cli.ts send <chat_id> <text>
+ *   echo "text" | bun run src/outbound-cli.ts send <chat_id> --stdin
+ */
+import { env, gateway } from "./config";
+
+const TELEGRAM_API = `https://api.telegram.org/bot${env.telegramBotToken}`;
+
+async function telegramSend(
+  chatId: number,
+  text: string,
+  parseMode?: string,
+): Promise<void> {
+  const resp = await fetch(`${TELEGRAM_API}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text,
+      parse_mode: parseMode,
+    }),
+  });
+  if (!resp.ok) {
+    const body = await resp.text();
+    throw new Error(`Telegram API error ${resp.status}: ${body}`);
+  }
+}
+
+async function readStdin(): Promise<string> {
+  const chunks: string[] = [];
+  const reader = Bun.stdin.stream().getReader();
+  const decoder = new TextDecoder();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(decoder.decode(value, { stream: true }));
+  }
+  return chunks.join("");
+}
+
+async function main(): Promise<void> {
+  const [cmd, ...args] = process.argv.slice(2);
+
+  switch (cmd) {
+    case "escalation": {
+      const [severity, id, description, source] = args;
+      if (!severity || !id || !description) {
+        console.error(
+          "Usage: outbound-cli escalation <severity> <id> <description> [source]",
+        );
+        process.exit(1);
+      }
+      const icon =
+        severity === "critical"
+          ? "🔴"
+          : severity === "high"
+            ? "🟠"
+            : severity === "medium"
+              ? "🟡"
+              : "🔵";
+      const text = [
+        `${icon} <b>Escalation [${severity.toUpperCase()}]</b>`,
+        `<b>ID:</b> <code>${id}</code>`,
+        source ? `<b>Source:</b> ${source}` : null,
+        "",
+        description,
+        "",
+        "React 👍 to ack, ✅ to resolve",
+      ]
+        .filter((l) => l !== null)
+        .join("\n");
+      await telegramSend(gateway.escalations.chat_id, text, "HTML");
+      console.log(`Escalation ${id} sent to Telegram.`);
+      break;
+    }
+
+    case "mail": {
+      const [mailId, from, subject, ...bodyParts] = args;
+      if (!mailId || !from || !subject) {
+        console.error(
+          "Usage: outbound-cli mail <mail-id> <from> <subject> <body>",
+        );
+        process.exit(1);
+      }
+      const body = bodyParts.join(" ") || (await readStdin());
+      const text = [
+        `📬 <b>Mail from ${escapeHtml(from)}</b>`,
+        `<b>Subject:</b> ${escapeHtml(subject)}`,
+        `<b>ID:</b> <code>${mailId}</code>`,
+        "",
+        escapeHtml(body),
+        "",
+        "Reply to this message to respond.",
+      ].join("\n");
+      await telegramSend(gateway.mail_inbox.chat_id, text, "HTML");
+      console.log(`Mail ${mailId} sent to Telegram.`);
+      break;
+    }
+
+    case "send": {
+      const [chatIdStr, ...textParts] = args;
+      if (!chatIdStr) {
+        console.error("Usage: outbound-cli send <chat_id> <text>|--stdin");
+        process.exit(1);
+      }
+      const chatId = parseInt(chatIdStr, 10);
+      let text: string;
+      if (textParts[0] === "--stdin") {
+        text = await readStdin();
+      } else {
+        text = textParts.join(" ");
+      }
+      if (!text) {
+        console.error("No text provided.");
+        process.exit(1);
+      }
+      await telegramSend(chatId, text);
+      console.log("Message sent.");
+      break;
+    }
+
+    default:
+      console.error(
+        "Usage: outbound-cli <escalation|mail|send> [args...]",
+      );
+      process.exit(1);
+  }
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

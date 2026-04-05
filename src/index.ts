@@ -1,26 +1,24 @@
-import { config } from "./config";
+/**
+ * Gas Town Telegram Gateway — Entry point
+ *
+ * Four-channel gateway bridging Telegram ↔ Gas Town:
+ *   1. Bot DM → Mayor direct line
+ *   2. Escalations group → alert routing
+ *   3. Mail inbox group → human mail replies
+ *   4. Crew chat groups → crew member nudges
+ *
+ * Runs in long polling mode (production-ready for single-instance deployment).
+ */
 import { createBot } from "./telegram";
+import { startAgentLogWatcher } from "./agent-log-watcher";
 
 const bot = createBot();
 
-if (config.webhookUrl) {
-  // Webhook mode — start HTTP server
-  bot.api.setWebhook(config.webhookUrl);
-  const { webhookCallback } = await import("grammy");
-  const server = Bun.serve({
-    port: config.port,
-    async fetch(req) {
-      const url = new URL(req.url);
-      if (url.pathname === "/webhook" && req.method === "POST") {
-        const handler = webhookCallback(bot, "std/http");
-        return handler(req);
-      }
-      return new Response("ok");
-    },
-  });
-  console.log(`Webhook server listening on port ${server.port}`);
-} else {
-  // Long polling mode — simpler for development
-  console.log("Starting bot in long polling mode...");
-  bot.start();
-}
+// Start agent-log watchers for outbound streaming
+startAgentLogWatcher();
+
+// Start bot in long polling mode
+console.log("[gateway] Starting Gas Town Telegram gateway...");
+bot.start({
+  onStart: () => console.log("[gateway] Bot is running."),
+});
