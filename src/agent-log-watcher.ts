@@ -78,7 +78,7 @@ async function readNewLines(state: WatchState): Promise<string[]> {
 }
 
 /** Extract assistant text from a JSONL event line */
-function extractAssistantText(line: string): string | null {
+export function extractAssistantText(line: string): string | null {
   try {
     const event = JSON.parse(line);
     // Claude Code JSONL format: look for assistant messages with text content
@@ -97,7 +97,7 @@ function extractAssistantText(line: string): string | null {
 }
 
 /** Truncate text for Telegram */
-function truncate(text: string, max: number = MAX_MESSAGE_LENGTH): string {
+export function truncate(text: string, max: number = MAX_MESSAGE_LENGTH): string {
   if (text.length <= max) return text;
   return text.slice(0, max - 20) + "\n\n[...truncated]";
 }

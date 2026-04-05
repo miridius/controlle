@@ -7,7 +7,9 @@
     "dev": "bun run --watch src/index.ts",
     "start": "bun run src/index.ts",
     "outbound": "bun run src/outbound-cli.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "test:coverage": "bun test --coverage"
   },
   "dependencies": {
     "grammy": "^1.35.0"
