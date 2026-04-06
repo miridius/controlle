@@ -3,22 +3,28 @@
   "supergroup_chat_id": -1003572202253,
   "topics": {
     "mayor": {
-      "thread_id": 0,
-      "session": "gt-mayor",
+      "thread_id": 7,
+      "session": "hq-mayor",
       "agent_log": true,
-      "project_dir": "-gt"
+      "project_dir": "-gt-mayor"
     },
     "escalations": {
-      "thread_id": 0
+      "thread_id": 8
     },
     "mail_inbox": {
-      "thread_id": 0
+      "thread_id": 9
     },
     "crew/sam": {
-      "thread_id": 0,
+      "thread_id": 10,
       "session": "co-crew-sam",
       "agent_log": true,
       "project_dir": "-gt-controlle-crew-sam"
+    },
+    "crew/alan": {
+      "thread_id": 211,
+      "session": "mk-crew-alan",
+      "agent_log": true,
+      "project_dir": "-gt-meerkat-crew-alan"
     }
   }
 }
