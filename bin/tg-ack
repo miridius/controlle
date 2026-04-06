@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Acknowledge a Telegram message with an eyes reaction.
+# Usage: tg-ack <message_id>
+curl -s -X POST "https://api.telegram.org/bot8714425840:AAG9Wp_CEV-TqhesGErhn2cEShL3gA22eGc/setMessageReaction" \
+  -H "Content-Type: application/json" \
+  -d "{\"chat_id\": -1003572202253, \"message_id\": $1, \"reaction\": [{\"type\": \"emoji\", \"emoji\": \"👀\"}]}" > /dev/null
