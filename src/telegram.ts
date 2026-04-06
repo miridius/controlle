@@ -15,6 +15,25 @@ import { handleMailInboxInbound } from "./channels/mail-inbox";
 import { setApi } from "./outbound";
 import { reportError } from "./error-handler";
 
+/**
+ * Dedup ring buffer: track recently seen Telegram update_ids to prevent
+ * duplicate processing when Telegram redelivers updates (e.g., slow handler).
+ */
+const DEDUP_CAPACITY = 1000;
+const seenUpdateIds = new Set<number>();
+const seenUpdateIdQueue: number[] = [];
+
+function isDuplicateUpdate(updateId: number): boolean {
+  if (seenUpdateIds.has(updateId)) return true;
+  seenUpdateIds.add(updateId);
+  seenUpdateIdQueue.push(updateId);
+  if (seenUpdateIdQueue.length > DEDUP_CAPACITY) {
+    const oldest = seenUpdateIdQueue.shift()!;
+    seenUpdateIds.delete(oldest);
+  }
+  return false;
+}
+
 export function createBot(): Bot {
   const bot = new Bot(env.telegramBotToken);
 
@@ -22,6 +41,17 @@ export function createBot(): Bot {
   setApi(bot.api);
 
   const groupId = supergroupChatId();
+
+  // --- Dedup middleware: skip already-processed updates ---
+  bot.use(async (ctx, next) => {
+    if (isDuplicateUpdate(ctx.update.update_id)) {
+      console.log(
+        `[gateway] Dropping duplicate update_id ${ctx.update.update_id}`,
+      );
+      return;
+    }
+    await next();
+  });
 
   // --- Inbound text messages: route by forum topic thread_id ---
   bot.on("message:text", async (ctx) => {
