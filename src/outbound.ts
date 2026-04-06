@@ -4,7 +4,7 @@
  * All messages go to the single supergroup, targeted to the correct
  * forum topic via message_thread_id.
  */
-import type { Api } from "grammy";
+import { type Api, GrammyError } from "grammy";
 import { log } from "./log";
 import { trackEscalation } from "./channels/escalations";
 import { trackMailMessage } from "./channels/mail-inbox";
@@ -134,4 +134,36 @@ function escapeHtml(s: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+}
+
+/**
+ * Escape special characters for Telegram MarkdownV2 parse mode.
+ * Characters that must be escaped: _ * [ ] ( ) ~ ` > # + - = | { } . !
+ */
+export function escapeMarkdownV2(s: string): string {
+  return s.replace(/[_*[\]()~`>#+\-=|{}.!\\]/g, "\\$&");
+}
+
+/**
+ * Send a message with MarkdownV2 formatting, falling back to plain text
+ * if Telegram rejects it (400 error from malformed markdown).
+ */
+export async function sendWithMarkdownFallback(
+  threadId: number,
+  text: string,
+  opts: SendOptions = { channel: "unknown" },
+): Promise<number> {
+  const escaped = escapeMarkdownV2(text);
+  try {
+    return await send(threadId, escaped, {
+      ...opts,
+      parseMode: "MarkdownV2",
+    });
+  } catch (err) {
+    if (err instanceof GrammyError && err.error_code === 400) {
+      // MarkdownV2 rejected — send as plain text
+      return await send(threadId, text, { ...opts, parseMode: undefined });
+    }
+    throw err;
+  }
 }

@@ -4,7 +4,14 @@
  * send() now targets a forum topic (threadId) within the single supergroup.
  */
 import { describe, expect, test, beforeEach, mock } from "bun:test";
-import { setApi, send, sendEscalation, sendMailMessage } from "../outbound";
+import {
+  setApi,
+  send,
+  sendEscalation,
+  sendMailMessage,
+  escapeMarkdownV2,
+  sendWithMarkdownFallback,
+} from "../outbound";
 import { supergroupChatId } from "../config";
 
 // Mock the log module to avoid file I/O
@@ -215,5 +222,110 @@ describe("sendMailMessage", () => {
     expect(text).toContain("&lt;script&gt;");
     expect(text).toContain("&amp;");
     expect(text).not.toContain("<script>");
+  });
+});
+
+describe("escapeMarkdownV2", () => {
+  test("escapes all MarkdownV2 special characters", () => {
+    const input = "hello_world *bold* [link](url) ~strike~ `code` >quote #tag +plus -dash =eq |pipe {brace} .dot !bang";
+    const result = escapeMarkdownV2(input);
+    expect(result).toBe(
+      "hello\\_world \\*bold\\* \\[link\\]\\(url\\) \\~strike\\~ \\`code\\` \\>quote \\#tag \\+plus \\-dash \\=eq \\|pipe \\{brace\\} \\.dot \\!bang",
+    );
+  });
+
+  test("returns plain text unchanged", () => {
+    expect(escapeMarkdownV2("hello world")).toBe("hello world");
+  });
+
+  test("escapes backslashes", () => {
+    expect(escapeMarkdownV2("path\\to\\file")).toBe("path\\\\to\\\\file");
+  });
+});
+
+describe("sendWithMarkdownFallback", () => {
+  test("sends with MarkdownV2 when it succeeds", async () => {
+    const { api, sentMessages } = createMockApi();
+    setApi(api as never);
+
+    await sendWithMarkdownFallback(42, "hello_world", { channel: "test" });
+    expect(sentMessages).toHaveLength(1);
+    expect(sentMessages[0].text).toBe("hello\\_world");
+    expect(sentMessages[0].opts.parse_mode).toBe("MarkdownV2");
+  });
+
+  test("falls back to plain text on 400 error", async () => {
+    let callCount = 0;
+    const sentMessages: Array<{
+      chatId: number;
+      text: string;
+      opts: Record<string, unknown>;
+    }> = [];
+
+    const api = {
+      sendMessage: mock(
+        async (
+          chatId: number,
+          text: string,
+          opts: Record<string, unknown>,
+        ) => {
+          callCount++;
+          if (callCount === 1 && opts.parse_mode === "MarkdownV2") {
+            // Import GrammyError to throw a proper error
+            const { GrammyError } = await import("grammy");
+            throw new GrammyError(
+              "Bad Request: can't parse entities",
+              { ok: false, error_code: 400, description: "Bad Request: can't parse entities" },
+              "sendMessage",
+              { chat_id: chatId, text },
+            );
+          }
+          sentMessages.push({ chatId, text, opts });
+          return { message_id: 100 };
+        },
+      ),
+    };
+    setApi(api as never);
+
+    const msgId = await sendWithMarkdownFallback(42, "bad *markdown", {
+      channel: "test",
+    });
+    expect(msgId).toBe(100);
+    // Should have tried MarkdownV2 first (failed), then plain text
+    expect(sentMessages).toHaveLength(1);
+    expect(sentMessages[0].text).toBe("bad *markdown"); // original unescaped text
+    expect(sentMessages[0].opts.parse_mode).toBeUndefined();
+  });
+
+  test("re-throws non-400 errors", async () => {
+    const api = {
+      sendMessage: mock(async () => {
+        const { GrammyError } = await import("grammy");
+        throw new GrammyError(
+          "Forbidden",
+          { ok: false, error_code: 403, description: "Forbidden" },
+          "sendMessage",
+          {},
+        );
+      }),
+    };
+    setApi(api as never);
+
+    await expect(
+      sendWithMarkdownFallback(42, "text", { channel: "test" }),
+    ).rejects.toThrow("Forbidden");
+  });
+
+  test("preserves disablePreview option through fallback", async () => {
+    const { api, sentMessages } = createMockApi();
+    setApi(api as never);
+
+    await sendWithMarkdownFallback(42, "text", {
+      channel: "test",
+      disablePreview: true,
+    });
+    expect(sentMessages[0].opts.link_preview_options).toEqual({
+      is_disabled: true,
+    });
   });
 });

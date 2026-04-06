@@ -9,7 +9,7 @@
 import { readdir, stat, open } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { send } from "./outbound";
+import { sendWithMarkdownFallback } from "./outbound";
 import { agentLogChannels } from "./config";
 import { reportError } from "./error-handler";
 
@@ -138,7 +138,7 @@ async function pollChannel(channel: {
     const text = extractAssistantText(line);
     if (text) {
       try {
-        await send(channel.threadId, truncate(text), {
+        await sendWithMarkdownFallback(channel.threadId, truncate(text), {
           channel: channel.label,
           disablePreview: true,
         });
