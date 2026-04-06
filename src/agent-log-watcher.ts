@@ -23,32 +23,43 @@ interface WatchState {
 /** Per-session watcher state */
 const watchers = new Map<string, WatchState>();
 
-/** Find the most recent JSONL file for a Claude session */
-async function findSessionJsonl(session: string): Promise<string | null> {
-  // Claude Code stores transcripts in ~/.claude/projects/<hash>/<session>.jsonl
+/** Find the most recent JSONL file for a Claude session in a specific project dir */
+async function findSessionJsonl(
+  session: string,
+  projectDir?: string,
+): Promise<string | null> {
   const claudeDir = join(homedir(), ".claude", "projects");
-  try {
-    const projectDirs = await readdir(claudeDir);
-    let newest: { path: string; mtime: number } | null = null;
 
-    for (const dir of projectDirs) {
-      const fullDir = join(claudeDir, dir);
-      try {
-        const files = await readdir(fullDir);
-        for (const f of files) {
-          if (!f.endsWith(".jsonl")) continue;
-          const fp = join(fullDir, f);
-          const st = await stat(fp);
-          if (!newest || st.mtimeMs > newest.mtime) {
-            newest = { path: fp, mtime: st.mtimeMs };
-          }
+  // If projectDir is specified, search only that directory
+  const dirsToSearch = projectDir ? [projectDir] : await listProjectDirs(claudeDir);
+  if (!dirsToSearch) return null;
+
+  let newest: { path: string; mtime: number } | null = null;
+
+  for (const dir of dirsToSearch) {
+    const fullDir = join(claudeDir, dir);
+    try {
+      const files = await readdir(fullDir);
+      for (const f of files) {
+        if (!f.endsWith(".jsonl")) continue;
+        const fp = join(fullDir, f);
+        const st = await stat(fp);
+        if (!newest || st.mtimeMs > newest.mtime) {
+          newest = { path: fp, mtime: st.mtimeMs };
         }
-      } catch {
-        // skip unreadable dirs
       }
+    } catch {
+      // skip unreadable dirs
     }
+  }
 
-    return newest?.path ?? null;
+  return newest?.path ?? null;
+}
+
+/** List project directory names (fallback when no projectDir configured) */
+async function listProjectDirs(claudeDir: string): Promise<string[] | null> {
+  try {
+    return await readdir(claudeDir);
   } catch {
     return null;
   }
@@ -106,13 +117,14 @@ export function truncate(text: string, max: number = MAX_MESSAGE_LENGTH): string
 async function pollChannel(channel: {
   threadId: number;
   session: string;
+  projectDir: string | undefined;
   label: string;
 }): Promise<void> {
   // Try to find the session file
   let state = watchers.get(channel.session);
 
   if (!state) {
-    const filePath = await findSessionJsonl(channel.session);
+    const filePath = await findSessionJsonl(channel.session, channel.projectDir);
     if (!filePath) return; // no session file yet
     const st = await stat(filePath);
     state = { filePath, offset: st.size }; // start from end (don't replay history)

@@ -20,6 +20,8 @@ export interface TopicChannel {
   thread_id: number;
   session?: string;
   agent_log?: boolean;
+  /** Claude projects directory name (e.g. "-gt-controlle-crew-sam") for JSONL resolution */
+  project_dir?: string;
 }
 
 export interface GatewayConfig {
@@ -98,14 +100,20 @@ export function supergroupChatId(): number {
 export function agentLogChannels(): Array<{
   threadId: number;
   session: string;
+  projectDir: string | undefined;
   label: string;
 }> {
-  const results: Array<{ threadId: number; session: string; label: string }> =
-    [];
+  const results: Array<{
+    threadId: number;
+    session: string;
+    projectDir: string | undefined;
+    label: string;
+  }> = [];
   if (gateway.topics.mayor.agent_log) {
     results.push({
       threadId: gateway.topics.mayor.thread_id,
       session: gateway.topics.mayor.session,
+      projectDir: gateway.topics.mayor.project_dir,
       label: "mayor",
     });
   }
@@ -114,6 +122,7 @@ export function agentLogChannels(): Array<{
       results.push({
         threadId: ch.thread_id,
         session: ch.session,
+        projectDir: ch.project_dir,
         label: `crew/${name}`,
       });
     }

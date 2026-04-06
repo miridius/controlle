@@ -5,7 +5,8 @@
     "mayor": {
       "thread_id": 0,
       "session": "gt-mayor",
-      "agent_log": true
+      "agent_log": true,
+      "project_dir": "-gt"
     },
     "escalations": {
       "thread_id": 0
@@ -17,7 +18,8 @@
       "sam": {
         "thread_id": 0,
         "session": "co-crew-sam",
-        "agent_log": true
+        "agent_log": true,
+        "project_dir": "-gt-controlle-crew-sam"
       }
     }
   }

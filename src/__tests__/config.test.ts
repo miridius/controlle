@@ -148,4 +148,20 @@ describe("agentLogChannels", () => {
       expect(typeof ch.label).toBe("string");
     }
   });
+
+  test("returns projectDir from config when set", () => {
+    const channels = agentLogChannels();
+    if (gateway.topics.mayor.agent_log && gateway.topics.mayor.project_dir) {
+      const mayor = channels.find((c) => c.label === "mayor");
+      expect(mayor).toBeDefined();
+      expect(mayor!.projectDir).toBe(gateway.topics.mayor.project_dir);
+    }
+    for (const [name, ch] of Object.entries(gateway.topics.crew)) {
+      if (ch.agent_log && ch.project_dir) {
+        const found = channels.find((c) => c.label === `crew/${name}`);
+        expect(found).toBeDefined();
+        expect(found!.projectDir).toBe(ch.project_dir);
+      }
+    }
+  });
 });
