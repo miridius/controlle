@@ -1,19 +1,14 @@
 /**
  * Outbound: GT → Telegram message sending
  *
- * Provides a send() function used by:
- * - Escalation routing (gt escalate → escalations group)
- * - Mail forwarding (gt mail send --human → mail inbox group)
- * - Agent-log streaming (agent output → DM/crew groups)
- *
- * Also provides a CLI interface for use as a gt hook/script:
- *   bun run src/outbound.ts <chat_id> <text>
- *   echo "text" | bun run src/outbound.ts <chat_id> --stdin
+ * All messages go to the single supergroup, targeted to the correct
+ * forum topic via message_thread_id.
  */
 import type { Api } from "grammy";
 import { log } from "./log";
 import { trackEscalation } from "./channels/escalations";
 import { trackMailMessage } from "./channels/mail-inbox";
+import { supergroupChatId } from "./config";
 
 let botApi: Api | null = null;
 
@@ -35,11 +30,11 @@ export interface SendOptions {
 }
 
 /**
- * Send a message to a Telegram chat via the bot API.
+ * Send a message to a forum topic in the supergroup.
  * Returns the Telegram message_id for tracking.
  */
 export async function send(
-  chatId: number,
+  threadId: number,
   text: string,
   opts: SendOptions = { channel: "unknown" },
 ): Promise<number> {
@@ -47,7 +42,10 @@ export async function send(
     throw new Error("Bot API not initialized. Call setApi() first.");
   }
 
+  const chatId = supergroupChatId();
+
   const msg = await botApi.sendMessage(chatId, text, {
+    message_thread_id: threadId,
     parse_mode: opts.parseMode,
     link_preview_options: opts.disablePreview
       ? { is_disabled: true }
@@ -67,10 +65,10 @@ export async function send(
 }
 
 /**
- * Send an escalation to the escalations group.
+ * Send an escalation to the escalations topic.
  */
 export async function sendEscalation(
-  chatId: number,
+  threadId: number,
   escalationId: string,
   severity: string,
   description: string,
@@ -97,7 +95,7 @@ export async function sendEscalation(
     .filter((line) => line !== null)
     .join("\n");
 
-  return send(chatId, text, {
+  return send(threadId, text, {
     channel: "escalations",
     escalationId,
     parseMode: "HTML",
@@ -105,10 +103,10 @@ export async function sendEscalation(
 }
 
 /**
- * Send a mail message to the mail inbox group.
+ * Send a mail message to the mail inbox topic.
  */
 export async function sendMailMessage(
-  chatId: number,
+  threadId: number,
   mailId: string,
   from: string,
   subject: string,
@@ -124,7 +122,7 @@ export async function sendMailMessage(
     "Reply to this message to respond.",
   ].join("\n");
 
-  return send(chatId, text, {
+  return send(threadId, text, {
     channel: "mail_inbox",
     mailId,
     parseMode: "HTML",

@@ -1,11 +1,17 @@
 /**
- * Tests for config.ts: channel resolution, agent log channels, config validation.
+ * Tests for config.ts: topic resolution, agent log channels, config validation.
  *
  * Note: config.ts reads TELEGRAM_BOT_TOKEN at import time, so we set the env
  * var before importing.
  */
 import { describe, expect, test } from "bun:test";
-import { resolveChannel, agentLogChannels, gateway, env } from "../config";
+import {
+  resolveChannel,
+  agentLogChannels,
+  gateway,
+  env,
+  supergroupChatId,
+} from "../config";
 
 describe("env", () => {
   test("reads TELEGRAM_BOT_TOKEN from environment", () => {
@@ -21,67 +27,76 @@ describe("env", () => {
 describe("gateway config", () => {
   test("loads gateway.config.json with required structure", () => {
     expect(gateway).toBeDefined();
-    expect(gateway.mayor_dm).toBeDefined();
-    expect(gateway.mayor_dm).toHaveProperty("chat_id");
-    expect(gateway.mayor_dm).toHaveProperty("session");
-    expect(gateway.escalations).toBeDefined();
-    expect(gateway.escalations).toHaveProperty("chat_id");
-    expect(gateway.mail_inbox).toBeDefined();
-    expect(gateway.mail_inbox).toHaveProperty("chat_id");
-    expect(gateway.crew).toBeDefined();
-    expect(typeof gateway.crew).toBe("object");
+    expect(gateway.supergroup_chat_id).toBeDefined();
+    expect(typeof gateway.supergroup_chat_id).toBe("number");
+    expect(gateway.topics).toBeDefined();
+    expect(gateway.topics.mayor).toBeDefined();
+    expect(gateway.topics.mayor).toHaveProperty("thread_id");
+    expect(gateway.topics.mayor).toHaveProperty("session");
+    expect(gateway.topics.escalations).toBeDefined();
+    expect(gateway.topics.escalations).toHaveProperty("thread_id");
+    expect(gateway.topics.mail_inbox).toBeDefined();
+    expect(gateway.topics.mail_inbox).toHaveProperty("thread_id");
+    expect(gateway.topics.crew).toBeDefined();
+    expect(typeof gateway.topics.crew).toBe("object");
   });
 
-  test("crew channels have required fields", () => {
-    for (const [name, ch] of Object.entries(gateway.crew)) {
-      expect(ch).toHaveProperty("chat_id");
+  test("crew topics have required fields", () => {
+    for (const [, ch] of Object.entries(gateway.topics.crew)) {
+      expect(ch).toHaveProperty("thread_id");
       expect(ch).toHaveProperty("session");
-      expect(typeof ch.chat_id).toBe("number");
+      expect(typeof ch.thread_id).toBe("number");
       expect(typeof ch.session).toBe("string");
     }
   });
 });
 
+describe("supergroupChatId", () => {
+  test("returns the configured supergroup chat_id", () => {
+    expect(supergroupChatId()).toBe(gateway.supergroup_chat_id);
+  });
+});
+
 describe("resolveChannel", () => {
-  test("returns undefined for unknown chat_id", () => {
+  test("returns undefined for unknown thread_id", () => {
     expect(resolveChannel(999999999)).toBeUndefined();
   });
 
-  test("returns undefined for chat_id 0 (unconfigured)", () => {
-    // chat_id 0 means "not configured" per the config format
+  test("returns undefined for thread_id 0 (unconfigured)", () => {
+    // thread_id 0 means "not configured" per the config format
     expect(resolveChannel(0)).toBeUndefined();
   });
 
-  test("returns correct type for mayor_dm if configured", () => {
-    if (gateway.mayor_dm.chat_id !== 0) {
-      const ch = resolveChannel(gateway.mayor_dm.chat_id);
+  test("returns correct type for mayor if configured", () => {
+    if (gateway.topics.mayor.thread_id !== 0) {
+      const ch = resolveChannel(gateway.topics.mayor.thread_id);
       expect(ch).toBeDefined();
-      expect(ch!.type).toBe("mayor_dm");
-      expect(ch!.session).toBe(gateway.mayor_dm.session);
-      expect(ch!.chatId).toBe(gateway.mayor_dm.chat_id);
+      expect(ch!.type).toBe("mayor");
+      expect(ch!.session).toBe(gateway.topics.mayor.session);
+      expect(ch!.threadId).toBe(gateway.topics.mayor.thread_id);
     }
   });
 
   test("returns correct type for escalations if configured", () => {
-    if (gateway.escalations.chat_id !== 0) {
-      const ch = resolveChannel(gateway.escalations.chat_id);
+    if (gateway.topics.escalations.thread_id !== 0) {
+      const ch = resolveChannel(gateway.topics.escalations.thread_id);
       expect(ch).toBeDefined();
       expect(ch!.type).toBe("escalations");
     }
   });
 
   test("returns correct type for mail_inbox if configured", () => {
-    if (gateway.mail_inbox.chat_id !== 0) {
-      const ch = resolveChannel(gateway.mail_inbox.chat_id);
+    if (gateway.topics.mail_inbox.thread_id !== 0) {
+      const ch = resolveChannel(gateway.topics.mail_inbox.thread_id);
       expect(ch).toBeDefined();
       expect(ch!.type).toBe("mail_inbox");
     }
   });
 
-  test("returns correct type and crewName for crew channels", () => {
-    for (const [name, crewCh] of Object.entries(gateway.crew)) {
-      if (crewCh.chat_id !== 0) {
-        const ch = resolveChannel(crewCh.chat_id);
+  test("returns correct type and crewName for crew topics", () => {
+    for (const [name, crewCh] of Object.entries(gateway.topics.crew)) {
+      if (crewCh.thread_id !== 0) {
+        const ch = resolveChannel(crewCh.thread_id);
         expect(ch).toBeDefined();
         expect(ch!.type).toBe("crew");
         expect(ch!.crewName).toBe(name);
@@ -97,19 +112,19 @@ describe("agentLogChannels", () => {
     expect(Array.isArray(channels)).toBe(true);
   });
 
-  test("includes mayor_dm if agent_log is true", () => {
+  test("includes mayor if agent_log is true", () => {
     const channels = agentLogChannels();
-    if (gateway.mayor_dm.agent_log) {
+    if (gateway.topics.mayor.agent_log) {
       const mayor = channels.find((c) => c.label === "mayor");
       expect(mayor).toBeDefined();
-      expect(mayor!.session).toBe(gateway.mayor_dm.session);
-      expect(mayor!.chatId).toBe(gateway.mayor_dm.chat_id);
+      expect(mayor!.session).toBe(gateway.topics.mayor.session);
+      expect(mayor!.threadId).toBe(gateway.topics.mayor.thread_id);
     }
   });
 
   test("includes crew channels with agent_log enabled", () => {
     const channels = agentLogChannels();
-    for (const [name, ch] of Object.entries(gateway.crew)) {
+    for (const [name, ch] of Object.entries(gateway.topics.crew)) {
       if (ch.agent_log) {
         const found = channels.find((c) => c.label === `crew/${name}`);
         expect(found).toBeDefined();
@@ -128,7 +143,7 @@ describe("agentLogChannels", () => {
   test("all returned channels have required fields", () => {
     const channels = agentLogChannels();
     for (const ch of channels) {
-      expect(typeof ch.chatId).toBe("number");
+      expect(typeof ch.threadId).toBe("number");
       expect(typeof ch.session).toBe("string");
       expect(typeof ch.label).toBe("string");
     }

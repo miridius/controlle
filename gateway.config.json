@@ -1,21 +1,24 @@
 {
   "$schema": "./gateway.schema.json",
-  "mayor_dm": {
-    "chat_id": 0,
-    "session": "gt-mayor",
-    "agent_log": true
-  },
-  "escalations": {
-    "chat_id": 0
-  },
-  "mail_inbox": {
-    "chat_id": 0
-  },
-  "crew": {
-    "sam": {
-      "chat_id": 0,
-      "session": "co-crew-sam",
+  "supergroup_chat_id": -1003572202253,
+  "topics": {
+    "mayor": {
+      "thread_id": 0,
+      "session": "gt-mayor",
       "agent_log": true
+    },
+    "escalations": {
+      "thread_id": 0
+    },
+    "mail_inbox": {
+      "thread_id": 0
+    },
+    "crew": {
+      "sam": {
+        "thread_id": 0,
+        "session": "co-crew-sam",
+        "agent_log": true
+      }
     }
   }
 }

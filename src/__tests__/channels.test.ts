@@ -1,5 +1,5 @@
 /**
- * Tests for channel handlers: mayor-dm, crew, mail-inbox, escalations.
+ * Tests for channel handlers: mayor, crew, mail-inbox, escalations.
  *
  * Mocks exec() to avoid real shell commands and grammy Context for message handling.
  */
@@ -16,7 +16,7 @@ mock.module("../log", () => ({
   log: mock(() => Promise.resolve()),
 }));
 
-import { handleMayorDmInbound } from "../channels/mayor-dm";
+import { handleMayorInbound } from "../channels/mayor-dm";
 import { handleCrewInbound } from "../channels/crew";
 import {
   handleMailInboxInbound,
@@ -40,10 +40,11 @@ function createMockCtx(overrides: Record<string, unknown> = {}) {
       ? overrides.message
       : {};
   return {
-    chat: { id: 100, type: "private" as const },
+    chat: { id: -1003572202253, type: "supergroup" as const },
     message: {
       text: "hello world",
       message_id: 1,
+      message_thread_id: 100,
       reply_to_message: undefined as { message_id: number } | undefined,
       ...msgOverrides,
     },
@@ -62,14 +63,14 @@ function createMockCtx(overrides: Record<string, unknown> = {}) {
   };
 }
 
-describe("handleMayorDmInbound", () => {
+describe("handleMayorInbound", () => {
   beforeEach(() => {
     execMock.mockClear();
   });
 
   test("wraps message in XML and nudges mayor session", async () => {
     const ctx = createMockCtx();
-    await handleMayorDmInbound(ctx as never);
+    await handleMayorInbound(ctx as never);
 
     expect(execMock).toHaveBeenCalledTimes(1);
     const call = getCall(0);
@@ -84,7 +85,7 @@ describe("handleMayorDmInbound", () => {
 
   test("reacts with thumbs up on success", async () => {
     const ctx = createMockCtx();
-    await handleMayorDmInbound(ctx as never);
+    await handleMayorInbound(ctx as never);
     expect(ctx.react).toHaveBeenCalledWith("👍");
   });
 
@@ -93,15 +94,17 @@ describe("handleMayorDmInbound", () => {
       Promise.reject(new Error("nudge failed")),
     );
     const ctx = createMockCtx();
-    await handleMayorDmInbound(ctx as never);
-    expect(ctx.reply).toHaveBeenCalledWith(
-      "Failed to deliver message to mayor.",
-    );
+    await handleMayorInbound(ctx as never);
+    expect(ctx.reply).toHaveBeenCalled();
+    const replyCall = ctx.reply.mock.calls[0] as unknown as [string, Record<string, unknown>];
+    expect(replyCall[0]).toBe("Failed to deliver message to mayor.");
+    // Should include thread_id in reply
+    expect(replyCall[1]).toEqual({ message_thread_id: 100 });
   });
 
   test("returns early if no text in message", async () => {
     const ctx = createMockCtx({ message: { text: undefined } });
-    await handleMayorDmInbound(ctx as never);
+    await handleMayorInbound(ctx as never);
     expect(execMock).not.toHaveBeenCalled();
   });
 
@@ -109,7 +112,7 @@ describe("handleMayorDmInbound", () => {
     const ctx = createMockCtx({
       message: { text: 'hello <world> & "quotes"' },
     });
-    await handleMayorDmInbound(ctx as never);
+    await handleMayorInbound(ctx as never);
     const stdin = getCall(0)[2].stdin;
     expect(stdin).toContain("&lt;world&gt;");
     expect(stdin).toContain("&amp;");
@@ -119,7 +122,7 @@ describe("handleMayorDmInbound", () => {
 
   test("falls back to first_name when username missing", async () => {
     const ctx = createMockCtx({ from: { first_name: "Alice" } });
-    await handleMayorDmInbound(ctx as never);
+    await handleMayorInbound(ctx as never);
     const stdin = getCall(0)[2].stdin;
     expect(stdin).toContain('from="Alice"');
   });
@@ -154,9 +157,9 @@ describe("handleCrewInbound", () => {
     );
     const ctx = createMockCtx();
     await handleCrewInbound(ctx as never, "sam", "co-crew-sam");
-    expect(ctx.reply).toHaveBeenCalledWith(
-      "Failed to deliver message to crew/sam.",
-    );
+    expect(ctx.reply).toHaveBeenCalled();
+    const replyCall = ctx.reply.mock.calls[0] as unknown as [string, Record<string, unknown>];
+    expect(replyCall[0]).toBe("Failed to deliver message to crew/sam.");
   });
 
   test("returns early if no text", async () => {
@@ -184,7 +187,9 @@ describe("handleMailInboxInbound", () => {
       message: { text: "hello", reply_to_message: undefined },
     });
     await handleMailInboxInbound(ctx as never);
-    expect(ctx.reply).toHaveBeenCalledWith(
+    expect(ctx.reply).toHaveBeenCalled();
+    const replyCall = ctx.reply.mock.calls[0] as unknown as [string, Record<string, unknown>];
+    expect(replyCall[0]).toBe(
       "Reply to a specific message to respond. Standalone messages are not routed.",
     );
     expect(execMock).not.toHaveBeenCalled();
@@ -198,7 +203,9 @@ describe("handleMailInboxInbound", () => {
       },
     });
     await handleMailInboxInbound(ctx as never);
-    expect(ctx.reply).toHaveBeenCalledWith(
+    expect(ctx.reply).toHaveBeenCalled();
+    const replyCall = ctx.reply.mock.calls[0] as unknown as [string, Record<string, unknown>];
+    expect(replyCall[0]).toBe(
       "Could not find the original mail message. It may be too old.",
     );
     expect(execMock).not.toHaveBeenCalled();
@@ -246,9 +253,9 @@ describe("handleMailInboxInbound", () => {
       },
     });
     await handleMailInboxInbound(ctx as never);
-    expect(ctx.reply).toHaveBeenCalledWith(
-      "Failed to send reply to mail mail-ghi.",
-    );
+    expect(ctx.reply).toHaveBeenCalled();
+    const replyCall = ctx.reply.mock.calls[0] as unknown as [string, Record<string, unknown>];
+    expect(replyCall[0]).toBe("Failed to send reply to mail mail-ghi.");
   });
 });
 

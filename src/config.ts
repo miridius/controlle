@@ -16,25 +16,20 @@ export const env = {
 
 // --- Gateway config (static JSON) ---
 
-export interface CrewChannel {
-  chat_id: number;
-  session: string;
+export interface TopicChannel {
+  thread_id: number;
+  session?: string;
   agent_log?: boolean;
 }
 
 export interface GatewayConfig {
-  mayor_dm: {
-    chat_id: number;
-    session: string;
-    agent_log?: boolean;
+  supergroup_chat_id: number;
+  topics: {
+    mayor: TopicChannel & { session: string };
+    escalations: TopicChannel;
+    mail_inbox: TopicChannel;
+    crew: Record<string, TopicChannel & { session: string }>;
   };
-  escalations: {
-    chat_id: number;
-  };
-  mail_inbox: {
-    chat_id: number;
-  };
-  crew: Record<string, CrewChannel>;
 }
 
 const configPath = join(import.meta.dir, "..", "gateway.config.json");
@@ -44,73 +39,80 @@ export const gateway: GatewayConfig = JSON.parse(
 
 // --- Lookup helpers ---
 
-export type ChannelType = "mayor_dm" | "escalations" | "mail_inbox" | "crew";
+export type ChannelType = "mayor" | "escalations" | "mail_inbox" | "crew";
 
 export interface ResolvedChannel {
   type: ChannelType;
   crewName?: string;
   session?: string;
-  chatId: number;
+  threadId: number;
 }
 
-const chatIdMap = new Map<number, ResolvedChannel>();
+const threadIdMap = new Map<number, ResolvedChannel>();
 
-function buildChatIdMap(): void {
-  if (gateway.mayor_dm.chat_id) {
-    chatIdMap.set(gateway.mayor_dm.chat_id, {
-      type: "mayor_dm",
-      session: gateway.mayor_dm.session,
-      chatId: gateway.mayor_dm.chat_id,
+function buildThreadIdMap(): void {
+  if (gateway.topics.mayor.thread_id) {
+    threadIdMap.set(gateway.topics.mayor.thread_id, {
+      type: "mayor",
+      session: gateway.topics.mayor.session,
+      threadId: gateway.topics.mayor.thread_id,
     });
   }
-  if (gateway.escalations.chat_id) {
-    chatIdMap.set(gateway.escalations.chat_id, {
+  if (gateway.topics.escalations.thread_id) {
+    threadIdMap.set(gateway.topics.escalations.thread_id, {
       type: "escalations",
-      chatId: gateway.escalations.chat_id,
+      threadId: gateway.topics.escalations.thread_id,
     });
   }
-  if (gateway.mail_inbox.chat_id) {
-    chatIdMap.set(gateway.mail_inbox.chat_id, {
+  if (gateway.topics.mail_inbox.thread_id) {
+    threadIdMap.set(gateway.topics.mail_inbox.thread_id, {
       type: "mail_inbox",
-      chatId: gateway.mail_inbox.chat_id,
+      threadId: gateway.topics.mail_inbox.thread_id,
     });
   }
-  for (const [name, ch] of Object.entries(gateway.crew)) {
-    if (ch.chat_id) {
-      chatIdMap.set(ch.chat_id, {
+  for (const [name, ch] of Object.entries(gateway.topics.crew)) {
+    if (ch.thread_id) {
+      threadIdMap.set(ch.thread_id, {
         type: "crew",
         crewName: name,
         session: ch.session,
-        chatId: ch.chat_id,
+        threadId: ch.thread_id,
       });
     }
   }
 }
 
-buildChatIdMap();
+buildThreadIdMap();
 
-export function resolveChannel(chatId: number): ResolvedChannel | undefined {
-  return chatIdMap.get(chatId);
+/** Resolve a forum topic thread_id to a channel */
+export function resolveChannel(threadId: number): ResolvedChannel | undefined {
+  return threadIdMap.get(threadId);
+}
+
+/** Get the supergroup chat_id */
+export function supergroupChatId(): number {
+  return gateway.supergroup_chat_id;
 }
 
 /** Get all channels that have agent_log streaming enabled */
 export function agentLogChannels(): Array<{
-  chatId: number;
+  threadId: number;
   session: string;
   label: string;
 }> {
-  const results: Array<{ chatId: number; session: string; label: string }> = [];
-  if (gateway.mayor_dm.agent_log) {
+  const results: Array<{ threadId: number; session: string; label: string }> =
+    [];
+  if (gateway.topics.mayor.agent_log) {
     results.push({
-      chatId: gateway.mayor_dm.chat_id,
-      session: gateway.mayor_dm.session,
+      threadId: gateway.topics.mayor.thread_id,
+      session: gateway.topics.mayor.session,
       label: "mayor",
     });
   }
-  for (const [name, ch] of Object.entries(gateway.crew)) {
+  for (const [name, ch] of Object.entries(gateway.topics.crew)) {
     if (ch.agent_log) {
       results.push({
-        chatId: ch.chat_id,
+        threadId: ch.thread_id,
         session: ch.session,
         label: `crew/${name}`,
       });

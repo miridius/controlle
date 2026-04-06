@@ -2,18 +2,21 @@
 /**
  * CLI for sending messages to Telegram from GT hooks/scripts.
  *
+ * All messages go to the single supergroup, targeted by forum topic thread_id.
+ *
  * Usage:
  *   bun run src/outbound-cli.ts escalation <severity> <id> <description> [source]
  *   bun run src/outbound-cli.ts mail <mail-id> <from> <subject> <body>
- *   bun run src/outbound-cli.ts send <chat_id> <text>
- *   echo "text" | bun run src/outbound-cli.ts send <chat_id> --stdin
+ *   bun run src/outbound-cli.ts send <thread_id> <text>
+ *   echo "text" | bun run src/outbound-cli.ts send <thread_id> --stdin
  */
 import { env, gateway } from "./config";
 
 const TELEGRAM_API = `https://api.telegram.org/bot${env.telegramBotToken}`;
+const SUPERGROUP_CHAT_ID = gateway.supergroup_chat_id;
 
 async function telegramSend(
-  chatId: number,
+  threadId: number,
   text: string,
   parseMode?: string,
 ): Promise<void> {
@@ -21,7 +24,8 @@ async function telegramSend(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      chat_id: chatId,
+      chat_id: SUPERGROUP_CHAT_ID,
+      message_thread_id: threadId,
       text,
       parse_mode: parseMode,
     }),
@@ -75,7 +79,7 @@ async function main(): Promise<void> {
       ]
         .filter((l) => l !== null)
         .join("\n");
-      await telegramSend(gateway.escalations.chat_id, text, "HTML");
+      await telegramSend(gateway.topics.escalations.thread_id, text, "HTML");
       console.log(`Escalation ${id} sent to Telegram.`);
       break;
     }
@@ -98,18 +102,18 @@ async function main(): Promise<void> {
         "",
         "Reply to this message to respond.",
       ].join("\n");
-      await telegramSend(gateway.mail_inbox.chat_id, text, "HTML");
+      await telegramSend(gateway.topics.mail_inbox.thread_id, text, "HTML");
       console.log(`Mail ${mailId} sent to Telegram.`);
       break;
     }
 
     case "send": {
-      const [chatIdStr, ...textParts] = args;
-      if (!chatIdStr) {
-        console.error("Usage: outbound-cli send <chat_id> <text>|--stdin");
+      const [threadIdStr, ...textParts] = args;
+      if (!threadIdStr) {
+        console.error("Usage: outbound-cli send <thread_id> <text>|--stdin");
         process.exit(1);
       }
-      const chatId = parseInt(chatIdStr, 10);
+      const threadId = parseInt(threadIdStr, 10);
       let text: string;
       if (textParts[0] === "--stdin") {
         text = await readStdin();
@@ -120,7 +124,7 @@ async function main(): Promise<void> {
         console.error("No text provided.");
         process.exit(1);
       }
-      await telegramSend(chatId, text);
+      await telegramSend(threadId, text);
       console.log("Message sent.");
       break;
     }

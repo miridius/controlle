@@ -1,8 +1,8 @@
 /**
- * Channel 4: Crew Direct Chat Groups (one per crew member)
+ * Crew Topic — Crew member direct chat (one topic per crew member)
  *
- * Inbound:  human sends message → gt nudge <crew-session> "text"
- * Outbound: crew agent-log → streamed to group (handled by agent-log watcher)
+ * Inbound:  human sends message in crew topic → gt nudge <crew-session> "text"
+ * Outbound: crew agent-log → streamed to topic (handled by agent-log watcher)
  */
 import type { Context } from "grammy";
 import { exec } from "../exec";
@@ -26,7 +26,9 @@ export async function handleCrewInbound(
     await ctx.react("👍");
   } catch (err) {
     console.error(`Failed to nudge crew/${crewName}:`, err);
-    await ctx.reply(`Failed to deliver message to crew/${crewName}.`);
+    await ctx.reply(`Failed to deliver message to crew/${crewName}.`, {
+      message_thread_id: ctx.message?.message_thread_id,
+    });
   }
 }
 

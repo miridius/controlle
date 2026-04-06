@@ -1,10 +1,11 @@
 /**
  * Tests for outbound.ts: send, sendEscalation, sendMailMessage, escapeHtml.
+ *
+ * send() now targets a forum topic (threadId) within the single supergroup.
  */
 import { describe, expect, test, beforeEach, mock } from "bun:test";
 import { setApi, send, sendEscalation, sendMailMessage } from "../outbound";
-import { trackEscalation } from "../channels/escalations";
-import { trackMailMessage } from "../channels/mail-inbox";
+import { supergroupChatId } from "../config";
 
 // Mock the log module to avoid file I/O
 mock.module("../log", () => ({
@@ -45,22 +46,25 @@ describe("send", () => {
     );
   });
 
-  test("sends message via bot API", async () => {
+  test("sends message to supergroup with message_thread_id", async () => {
     const { api, sentMessages } = createMockApi();
     setApi(api as never);
 
-    const msgId = await send(123, "hello", { channel: "test" });
+    const msgId = await send(42, "hello", { channel: "test" });
     expect(msgId).toBe(100);
     expect(sentMessages).toHaveLength(1);
-    expect(sentMessages[0].chatId).toBe(123);
+    // Should send to the supergroup chat_id, not the threadId
+    expect(sentMessages[0].chatId).toBe(supergroupChatId());
     expect(sentMessages[0].text).toBe("hello");
+    // Thread ID should be passed as message_thread_id
+    expect(sentMessages[0].opts.message_thread_id).toBe(42);
   });
 
   test("passes parse_mode from options", async () => {
     const { api, sentMessages } = createMockApi();
     setApi(api as never);
 
-    await send(123, "<b>bold</b>", { channel: "test", parseMode: "HTML" });
+    await send(42, "<b>bold</b>", { channel: "test", parseMode: "HTML" });
     expect(sentMessages[0].opts.parse_mode).toBe("HTML");
   });
 
@@ -68,7 +72,7 @@ describe("send", () => {
     const { api, sentMessages } = createMockApi();
     setApi(api as never);
 
-    await send(123, "https://example.com", {
+    await send(42, "https://example.com", {
       channel: "test",
       disablePreview: true,
     });
@@ -81,7 +85,7 @@ describe("send", () => {
     const { api, sentMessages } = createMockApi();
     setApi(api as never);
 
-    await send(123, "text", { channel: "test", disablePreview: false });
+    await send(42, "text", { channel: "test", disablePreview: false });
     expect(sentMessages[0].opts.link_preview_options).toBeUndefined();
   });
 
@@ -89,11 +93,10 @@ describe("send", () => {
     const { api } = createMockApi();
     setApi(api as never);
 
-    const msgId = await send(123, "esc", {
+    const msgId = await send(42, "esc", {
       channel: "escalations",
       escalationId: "esc-001",
     });
-    // The track function is called internally — we verify via sendEscalation tests
     expect(msgId).toBeGreaterThanOrEqual(100);
   });
 
@@ -101,7 +104,7 @@ describe("send", () => {
     const { api } = createMockApi();
     setApi(api as never);
 
-    const msgId = await send(123, "mail", {
+    const msgId = await send(42, "mail", {
       channel: "mail_inbox",
       mailId: "mail-001",
     });
@@ -114,7 +117,7 @@ describe("sendEscalation", () => {
     const { api, sentMessages } = createMockApi();
     setApi(api as never);
 
-    await sendEscalation(123, "esc-1", "critical", "Server is down", "mayor");
+    await sendEscalation(42, "esc-1", "critical", "Server is down", "mayor");
     expect(sentMessages[0].text).toContain("🔴");
     expect(sentMessages[0].text).toContain("CRITICAL");
     expect(sentMessages[0].text).toContain("esc-1");
@@ -122,13 +125,14 @@ describe("sendEscalation", () => {
     expect(sentMessages[0].text).toContain("Source:");
     expect(sentMessages[0].text).toContain("mayor");
     expect(sentMessages[0].opts.parse_mode).toBe("HTML");
+    expect(sentMessages[0].opts.message_thread_id).toBe(42);
   });
 
   test("formats high escalation with orange icon", async () => {
     const { api, sentMessages } = createMockApi();
     setApi(api as never);
 
-    await sendEscalation(123, "esc-2", "high", "Test failure");
+    await sendEscalation(42, "esc-2", "high", "Test failure");
     expect(sentMessages[0].text).toContain("🟠");
     expect(sentMessages[0].text).toContain("HIGH");
   });
@@ -137,7 +141,7 @@ describe("sendEscalation", () => {
     const { api, sentMessages } = createMockApi();
     setApi(api as never);
 
-    await sendEscalation(123, "esc-3", "medium", "Slow query");
+    await sendEscalation(42, "esc-3", "medium", "Slow query");
     expect(sentMessages[0].text).toContain("🟡");
   });
 
@@ -145,7 +149,7 @@ describe("sendEscalation", () => {
     const { api, sentMessages } = createMockApi();
     setApi(api as never);
 
-    await sendEscalation(123, "esc-4", "low", "Minor issue");
+    await sendEscalation(42, "esc-4", "low", "Minor issue");
     expect(sentMessages[0].text).toContain("🔵");
   });
 
@@ -153,7 +157,7 @@ describe("sendEscalation", () => {
     const { api, sentMessages } = createMockApi();
     setApi(api as never);
 
-    await sendEscalation(123, "esc-5", "high", "No source");
+    await sendEscalation(42, "esc-5", "high", "No source");
     expect(sentMessages[0].text).not.toContain("Source:");
   });
 
@@ -161,7 +165,7 @@ describe("sendEscalation", () => {
     const { api, sentMessages } = createMockApi();
     setApi(api as never);
 
-    await sendEscalation(123, "esc-6", "high", "Test");
+    await sendEscalation(42, "esc-6", "high", "Test");
     expect(sentMessages[0].text).toContain("React 👍 to ack, ✅ to resolve");
   });
 });
@@ -171,7 +175,7 @@ describe("sendMailMessage", () => {
     const { api, sentMessages } = createMockApi();
     setApi(api as never);
 
-    await sendMailMessage(456, "mail-1", "alice", "Hello", "Body text");
+    await sendMailMessage(42, "mail-1", "alice", "Hello", "Body text");
     expect(sentMessages[0].text).toContain("📬");
     expect(sentMessages[0].text).toContain("alice");
     expect(sentMessages[0].text).toContain("Hello");
@@ -179,6 +183,7 @@ describe("sendMailMessage", () => {
     expect(sentMessages[0].text).toContain("Body text");
     expect(sentMessages[0].text).toContain("Reply to this message to respond.");
     expect(sentMessages[0].opts.parse_mode).toBe("HTML");
+    expect(sentMessages[0].opts.message_thread_id).toBe(42);
   });
 
   test("escapes HTML in user-provided fields", async () => {
@@ -186,7 +191,7 @@ describe("sendMailMessage", () => {
     setApi(api as never);
 
     await sendMailMessage(
-      456,
+      42,
       "mail-2",
       "<script>alert</script>",
       "Re: <b>bold</b>",

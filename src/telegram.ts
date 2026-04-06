@@ -1,12 +1,13 @@
 /**
  * Telegram bot setup and inbound message routing.
  *
- * Routes messages to the appropriate channel handler based on chat_id.
- * Unrecognized chats are ignored with a log message.
+ * Routes messages to the appropriate channel handler based on
+ * message_thread_id (forum topic) within the single supergroup.
+ * Unrecognized topics or chats are ignored with a log message.
  */
 import { Bot } from "grammy";
-import { env, resolveChannel } from "./config";
-import { handleMayorDmInbound } from "./channels/mayor-dm";
+import { env, resolveChannel, supergroupChatId } from "./config";
+import { handleMayorInbound } from "./channels/mayor-dm";
 import { handleEscalationReaction } from "./channels/escalations";
 import { handleMailInboxInbound } from "./channels/mail-inbox";
 import { handleCrewInbound } from "./channels/crew";
@@ -18,21 +19,39 @@ export function createBot(): Bot {
   // Make the bot API available for outbound messages
   setApi(bot.api);
 
-  // --- Inbound text messages: route by channel ---
+  const groupId = supergroupChatId();
+
+  // --- Inbound text messages: route by forum topic thread_id ---
   bot.on("message:text", async (ctx) => {
     const chatId = ctx.chat.id;
-    const channel = resolveChannel(chatId);
 
-    if (!channel) {
+    // Only process messages from our supergroup
+    if (chatId !== groupId) {
       console.log(
         `[gateway] Ignoring message from unknown chat ${chatId} (${ctx.chat.type})`,
       );
       return;
     }
 
+    const threadId = ctx.message.message_thread_id;
+    if (!threadId) {
+      console.log(
+        "[gateway] Ignoring message without thread_id (general topic)",
+      );
+      return;
+    }
+
+    const channel = resolveChannel(threadId);
+    if (!channel) {
+      console.log(
+        `[gateway] Ignoring message from unknown topic thread ${threadId}`,
+      );
+      return;
+    }
+
     switch (channel.type) {
-      case "mayor_dm":
-        await handleMayorDmInbound(ctx);
+      case "mayor":
+        await handleMayorInbound(ctx);
         break;
       case "mail_inbox":
         await handleMailInboxInbound(ctx);
@@ -41,9 +60,10 @@ export function createBot(): Bot {
         await handleCrewInbound(ctx, channel.crewName!, channel.session!);
         break;
       case "escalations":
-        // Escalations group is outbound-only for text; inbound is reactions
+        // Escalations topic is outbound-only for text; inbound is reactions
         await ctx.reply(
-          "This channel is for escalation alerts. Use reactions to respond.",
+          "This topic is for escalation alerts. Use reactions to respond.",
+          { message_thread_id: threadId },
         );
         break;
     }
@@ -52,30 +72,37 @@ export function createBot(): Bot {
   // --- Reaction handling (escalations) ---
   bot.on("message_reaction", async (ctx) => {
     const chatId = ctx.chat.id;
-    const channel = resolveChannel(chatId);
+    if (chatId !== groupId) return;
 
-    if (channel?.type === "escalations") {
-      await handleEscalationReaction(ctx);
-    }
+    // Reactions in the escalations topic (or any topic with tracked messages)
+    await handleEscalationReaction(ctx);
   });
 
   // --- /start command ---
   bot.command("start", (ctx) =>
     ctx.reply(
-      "Gas Town Gateway active. Messages are routed to the appropriate agent.",
+      "Gas Town Gateway active. Messages are routed by forum topic.",
     ),
   );
 
-  // --- /status command: show which channels are configured ---
+  // --- /status command: show which topic this message is in ---
   bot.command("status", async (ctx) => {
-    const chatId = ctx.chat.id;
-    const channel = resolveChannel(chatId);
+    const threadId = ctx.message?.message_thread_id;
+    if (!threadId) {
+      await ctx.reply("Send this command in a forum topic to see its mapping.");
+      return;
+    }
+    const channel = resolveChannel(threadId);
     if (channel) {
       await ctx.reply(
-        `This chat is mapped to: ${channel.type}${channel.crewName ? ` (${channel.crewName})` : ""}`,
+        `This topic is mapped to: ${channel.type}${channel.crewName ? ` (${channel.crewName})` : ""}`,
+        { message_thread_id: threadId },
       );
     } else {
-      await ctx.reply(`This chat (${chatId}) is not mapped to any channel.`);
+      await ctx.reply(
+        `This topic (thread ${threadId}) is not mapped to any channel.`,
+        { message_thread_id: threadId },
+      );
     }
   });
 

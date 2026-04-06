@@ -2,7 +2,7 @@
  * Agent-log watcher: streams Claude Code JSONL transcripts to Telegram
  *
  * Watches for new assistant messages in Claude session JSONL files and
- * forwards them to the appropriate Telegram channel (mayor DM or crew groups).
+ * forwards them to the appropriate forum topic in the supergroup.
  *
  * Uses a tail-like approach: track file size, read new bytes, parse JSONL lines.
  */
@@ -104,7 +104,7 @@ export function truncate(text: string, max: number = MAX_MESSAGE_LENGTH): string
 
 /** Poll loop for a single channel */
 async function pollChannel(channel: {
-  chatId: number;
+  threadId: number;
   session: string;
   label: string;
 }): Promise<void> {
@@ -125,7 +125,7 @@ async function pollChannel(channel: {
     const text = extractAssistantText(line);
     if (text) {
       try {
-        await send(channel.chatId, truncate(text), {
+        await send(channel.threadId, truncate(text), {
           channel: channel.label,
           disablePreview: true,
         });

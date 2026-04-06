@@ -1,11 +1,11 @@
 /**
  * Gas Town Telegram Gateway — Entry point
  *
- * Four-channel gateway bridging Telegram ↔ Gas Town:
- *   1. Bot DM → Mayor direct line
- *   2. Escalations group → alert routing
- *   3. Mail inbox group → human mail replies
- *   4. Crew chat groups → crew member nudges
+ * Single-supergroup gateway bridging Telegram ↔ Gas Town via forum topics:
+ *   1. Mayor topic → Mayor direct line (nudges)
+ *   2. Escalations topic → alert routing (reactions to ack/resolve)
+ *   3. Mail inbox topic → human mail replies
+ *   4. Crew topics → crew member nudges (one topic per crew member)
  *
  * Runs in long polling mode (production-ready for single-instance deployment).
  */
