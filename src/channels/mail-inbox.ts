@@ -7,8 +7,9 @@
 import type { Context } from "grammy";
 import { exec } from "../exec";
 import { log } from "../log";
+import { persistMailMapping, lookupMailMapping } from "../msg-map";
 
-/** Map Telegram message_id → GT mail message ID */
+/** In-memory cache: Telegram message_id → GT mail message ID */
 const msgToMailId = new Map<number, string>();
 
 export function trackMailMessage(
@@ -16,6 +17,7 @@ export function trackMailMessage(
   mailId: string,
 ): void {
   msgToMailId.set(telegramMsgId, mailId);
+  persistMailMapping(telegramMsgId, mailId);
 }
 
 export async function handleMailInboxInbound(ctx: Context): Promise<void> {
@@ -34,7 +36,7 @@ export async function handleMailInboxInbound(ctx: Context): Promise<void> {
     return;
   }
 
-  const mailId = msgToMailId.get(replyTo);
+  const mailId = msgToMailId.get(replyTo) ?? lookupMailMapping(replyTo);
   if (!mailId) {
     await ctx.reply(
       "Could not find the original mail message. It may be too old.",

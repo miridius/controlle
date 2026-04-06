@@ -16,6 +16,20 @@ mock.module("../log", () => ({
   log: mock(() => Promise.resolve()),
 }));
 
+// Mock msg-map to avoid file I/O — store mappings in-memory for tests
+const testMailMap = new Map<string, string>();
+const testEscMap = new Map<string, string>();
+mock.module("../msg-map", () => ({
+  persistMailMapping: mock((id: number, mailId: string) => {
+    testMailMap.set(String(id), mailId);
+  }),
+  lookupMailMapping: mock((id: number) => testMailMap.get(String(id))),
+  persistEscalationMapping: mock((id: number, escId: string) => {
+    testEscMap.set(String(id), escId);
+  }),
+  lookupEscalationMapping: mock((id: number) => testEscMap.get(String(id))),
+}));
+
 import { handleMayorInbound } from "../channels/mayor-dm";
 import { handleCrewInbound } from "../channels/crew";
 import {
@@ -256,6 +270,25 @@ describe("handleMailInboxInbound", () => {
     expect(ctx.reply).toHaveBeenCalled();
     const replyCall = ctx.reply.mock.calls[0] as unknown as [string, Record<string, unknown>];
     expect(replyCall[0]).toBe("Failed to send reply to mail mail-ghi.");
+  });
+
+  test("falls back to file-backed mapping for CLI-sent messages", async () => {
+    // Simulate CLI having persisted a mapping (via the mocked msg-map)
+    testMailMap.set("700", "mail-cli");
+
+    const ctx = createMockCtx({
+      message: {
+        text: "reply to cli mail",
+        reply_to_message: { message_id: 700 },
+      },
+    });
+    await handleMailInboxInbound(ctx as never);
+
+    expect(execMock).toHaveBeenCalledTimes(1);
+    const call = getCall(0);
+    expect(call[0]).toBe("gt");
+    expect(call[1]).toEqual(["mail", "reply", "mail-cli", "--stdin"]);
+    expect(call[2].stdin).toBe("reply to cli mail");
   });
 });
 

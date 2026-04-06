@@ -9,8 +9,9 @@
 import type { Context } from "grammy";
 import { exec } from "../exec";
 import { log } from "../log";
+import { persistEscalationMapping, lookupEscalationMapping } from "../msg-map";
 
-/** Map Telegram message_id → GT escalation bead ID */
+/** In-memory cache: Telegram message_id → GT escalation bead ID */
 const msgToEscalation = new Map<number, string>();
 
 export function trackEscalation(
@@ -18,6 +19,7 @@ export function trackEscalation(
   escalationId: string,
 ): void {
   msgToEscalation.set(telegramMsgId, escalationId);
+  persistEscalationMapping(telegramMsgId, escalationId);
 }
 
 export async function handleEscalationReaction(ctx: Context): Promise<void> {
@@ -25,7 +27,7 @@ export async function handleEscalationReaction(ctx: Context): Promise<void> {
   if (!reaction) return;
 
   const msgId = reaction.message_id;
-  const escalationId = msgToEscalation.get(msgId);
+  const escalationId = msgToEscalation.get(msgId) ?? lookupEscalationMapping(msgId);
   if (!escalationId) return;
 
   const newEmojis = reaction.new_reaction

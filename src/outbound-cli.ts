@@ -11,6 +11,7 @@
  *   echo "text" | bun run src/outbound-cli.ts send <thread_id> --stdin
  */
 import { env, gateway } from "./config";
+import { persistMailMapping, persistEscalationMapping } from "./msg-map";
 
 const TELEGRAM_API = `https://api.telegram.org/bot${env.telegramBotToken}`;
 const SUPERGROUP_CHAT_ID = gateway.supergroup_chat_id;
@@ -19,7 +20,7 @@ async function telegramSend(
   threadId: number,
   text: string,
   parseMode?: string,
-): Promise<void> {
+): Promise<number> {
   const resp = await fetch(`${TELEGRAM_API}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -34,6 +35,8 @@ async function telegramSend(
     const body = await resp.text();
     throw new Error(`Telegram API error ${resp.status}: ${body}`);
   }
+  const result = (await resp.json()) as { result: { message_id: number } };
+  return result.result.message_id;
 }
 
 async function readStdin(): Promise<string> {
@@ -79,8 +82,9 @@ async function main(): Promise<void> {
       ]
         .filter((l) => l !== null)
         .join("\n");
-      await telegramSend(gateway.topics.escalations.thread_id, text, "HTML");
-      console.log(`Escalation ${id} sent to Telegram.`);
+      const escMsgId = await telegramSend(gateway.topics.escalations.thread_id, text, "HTML");
+      persistEscalationMapping(escMsgId, id);
+      console.log(`Escalation ${id} sent to Telegram (msg ${escMsgId}).`);
       break;
     }
 
@@ -102,8 +106,9 @@ async function main(): Promise<void> {
         "",
         "Reply to this message to respond.",
       ].join("\n");
-      await telegramSend(gateway.topics.mail_inbox.thread_id, text, "HTML");
-      console.log(`Mail ${mailId} sent to Telegram.`);
+      const mailMsgId = await telegramSend(gateway.topics.mail_inbox.thread_id, text, "HTML");
+      persistMailMapping(mailMsgId, mailId);
+      console.log(`Mail ${mailId} sent to Telegram (msg ${mailMsgId}).`);
       break;
     }
 
