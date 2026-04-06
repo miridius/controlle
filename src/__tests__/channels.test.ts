@@ -30,7 +30,7 @@ mock.module("../msg-map", () => ({
   lookupEscalationMapping: mock((id: number) => testEscMap.get(String(id))),
 }));
 
-import { handleAgentInbound } from "../channels/agent";
+import { handleAgentInbound, retryConfig } from "../channels/agent";
 import {
   handleMailInboxInbound,
   trackMailMessage,
@@ -58,7 +58,10 @@ function createMockCtx(overrides: Record<string, unknown> = {}) {
       text: "hello world",
       message_id: 1,
       message_thread_id: 100,
-      reply_to_message: undefined as { message_id: number } | undefined,
+      reply_to_message: undefined as
+        | { message_id: number; text?: string }
+        | undefined,
+      quote: undefined as { text?: string } | undefined,
       ...msgOverrides,
     },
     from: (overrides.from as { username?: string; first_name?: string }) ?? {
@@ -78,10 +81,12 @@ function createMockCtx(overrides: Record<string, unknown> = {}) {
 
 describe("handleAgentInbound (mayor)", () => {
   beforeEach(() => {
-    execMock.mockClear();
+    execMock.mockReset();
+    execMock.mockImplementation(() => Promise.resolve("ok"));
+    retryConfig.delayMs = 0; // No delay in tests
   });
 
-  test("wraps message in XML and nudges session", async () => {
+  test("wraps message in full XML with msg_id and ack-cmd", async () => {
     const ctx = createMockCtx();
     await handleAgentInbound(ctx as never, "mayor", "gt-mayor");
 
@@ -91,10 +96,15 @@ describe("handleAgentInbound (mayor)", () => {
     expect(call[1][0]).toBe("nudge");
     expect(call[1][1]).toBe("gt-mayor");
     expect(call[1]).toContain("--stdin");
-    expect(call[2].stdin).toContain("<telegram>");
-    expect(call[2].stdin).toContain('from="testuser"');
-    expect(call[2].stdin).toContain("hello world");
-    expect(call[2].stdin).toContain("</telegram>");
+    const stdin = call[2].stdin;
+    expect(stdin).toContain("<telegram>");
+    expect(stdin).toContain('from="testuser"');
+    expect(stdin).toContain('msg_id="1"');
+    expect(stdin).toContain("hello world");
+    expect(stdin).toContain("<ack-cmd>bin/tg-ack 1</ack-cmd>");
+    expect(stdin).toContain("</telegram>");
+    // No reply_to for a non-reply message
+    expect(stdin).not.toContain("reply_to=");
   });
 
   test("reacts with thumbs up on success", async () => {
@@ -103,17 +113,30 @@ describe("handleAgentInbound (mayor)", () => {
     expect(ctx.react).toHaveBeenCalledWith("👍");
   });
 
-  test("replies with error message on exec failure", async () => {
-    execMock.mockImplementationOnce(() =>
+  test("replies with error after all retries exhausted", async () => {
+    execMock.mockImplementation(() =>
       Promise.reject(new Error("nudge failed")),
     );
     const ctx = createMockCtx();
     await handleAgentInbound(ctx as never, "mayor", "gt-mayor");
+    // Should have retried 3 times
+    expect(execMock).toHaveBeenCalledTimes(3);
     expect(ctx.reply).toHaveBeenCalled();
     const replyCall = ctx.reply.mock.calls[0] as unknown as [string, Record<string, unknown>];
     expect(replyCall[0]).toBe("Failed to deliver message to mayor.");
     // Should include thread_id in reply
     expect(replyCall[1]).toEqual({ message_thread_id: 100 });
+  });
+
+  test("retries on transient failure then succeeds", async () => {
+    execMock
+      .mockImplementationOnce(() => Promise.reject(new Error("transient")))
+      .mockImplementationOnce(() => Promise.resolve("ok"));
+    const ctx = createMockCtx();
+    await handleAgentInbound(ctx as never, "mayor", "gt-mayor");
+    expect(execMock).toHaveBeenCalledTimes(2);
+    expect(ctx.react).toHaveBeenCalledWith("👍");
+    expect(ctx.reply).not.toHaveBeenCalled();
   });
 
   test("returns early if no text in message", async () => {
@@ -140,14 +163,69 @@ describe("handleAgentInbound (mayor)", () => {
     const stdin = getCall(0)[2].stdin;
     expect(stdin).toContain('from="Alice"');
   });
+
+  test("includes reply_to and reply-context for real replies", async () => {
+    const ctx = createMockCtx({
+      message: {
+        text: "my reply",
+        message_id: 50,
+        message_thread_id: 100,
+        reply_to_message: { message_id: 42, text: "original message" },
+      },
+    });
+    await handleAgentInbound(ctx as never, "mayor", "gt-mayor");
+    const stdin = getCall(0)[2].stdin;
+    expect(stdin).toContain('reply_to="42"');
+    expect(stdin).toContain(
+      "<reply-context>original message</reply-context>",
+    );
+    expect(stdin).toContain("<ack-cmd>bin/tg-ack 50</ack-cmd>");
+  });
+
+  test("filters out reply_to when it points to topic root", async () => {
+    // In forum topics, reply_to_message.message_id === message_thread_id for normal messages
+    const ctx = createMockCtx({
+      message: {
+        text: "normal forum message",
+        message_id: 55,
+        message_thread_id: 100,
+        reply_to_message: { message_id: 100, text: "topic root" },
+      },
+    });
+    await handleAgentInbound(ctx as never, "mayor", "gt-mayor");
+    const stdin = getCall(0)[2].stdin;
+    expect(stdin).not.toContain("reply_to=");
+    expect(stdin).not.toContain("<reply-context>");
+  });
+
+  test("includes quote text when present", async () => {
+    const ctx = createMockCtx({
+      message: {
+        text: "responding to this",
+        message_id: 60,
+        message_thread_id: 100,
+        reply_to_message: { message_id: 45, text: "full original text" },
+        quote: { text: "selected portion" },
+      },
+    });
+    await handleAgentInbound(ctx as never, "mayor", "gt-mayor");
+    const stdin = getCall(0)[2].stdin;
+    expect(stdin).toContain("<quote>selected portion</quote>");
+    expect(stdin).toContain(
+      "<reply-context>full original text</reply-context>",
+    );
+    expect(stdin).toContain('reply_to="45"');
+  });
 });
 
 describe("handleAgentInbound (crew)", () => {
   beforeEach(() => {
-    execMock.mockClear();
+    execMock.mockReset();
+    execMock.mockImplementation(() => Promise.resolve("ok"));
+    retryConfig.delayMs = 0;
   });
 
-  test("nudges correct session with wrapped XML", async () => {
+  test("nudges correct session with full XML including msg_id and ack-cmd", async () => {
     const ctx = createMockCtx();
     await handleAgentInbound(ctx as never, "crew/sam", "co-crew-sam");
 
@@ -155,8 +233,11 @@ describe("handleAgentInbound (crew)", () => {
     const call = getCall(0);
     expect(call[0]).toBe("gt");
     expect(call[1]).toEqual(["nudge", "co-crew-sam", "--stdin"]);
-    expect(call[2].stdin).toContain("<telegram>");
-    expect(call[2].stdin).toContain("hello world");
+    const stdin = call[2].stdin;
+    expect(stdin).toContain("<telegram>");
+    expect(stdin).toContain('msg_id="1"');
+    expect(stdin).toContain("hello world");
+    expect(stdin).toContain("<ack-cmd>bin/tg-ack 1</ack-cmd>");
   });
 
   test("reacts with thumbs up on success", async () => {
@@ -165,12 +246,13 @@ describe("handleAgentInbound (crew)", () => {
     expect(ctx.react).toHaveBeenCalledWith("👍");
   });
 
-  test("replies with error on exec failure", async () => {
-    execMock.mockImplementationOnce(() =>
+  test("replies with error after retries exhausted", async () => {
+    execMock.mockImplementation(() =>
       Promise.reject(new Error("failed")),
     );
     const ctx = createMockCtx();
     await handleAgentInbound(ctx as never, "crew/sam", "co-crew-sam");
+    expect(execMock).toHaveBeenCalledTimes(3);
     expect(ctx.reply).toHaveBeenCalled();
     const replyCall = ctx.reply.mock.calls[0] as unknown as [string, Record<string, unknown>];
     expect(replyCall[0]).toBe("Failed to deliver message to crew/sam.");
@@ -193,7 +275,8 @@ describe("handleAgentInbound (crew)", () => {
 
 describe("handleMailInboxInbound", () => {
   beforeEach(() => {
-    execMock.mockClear();
+    execMock.mockReset();
+    execMock.mockImplementation(() => Promise.resolve("ok"));
   });
 
   test("rejects standalone messages (no reply-to)", async () => {
@@ -294,7 +377,8 @@ describe("handleMailInboxInbound", () => {
 
 describe("handleEscalationReaction", () => {
   beforeEach(() => {
-    execMock.mockClear();
+    execMock.mockReset();
+    execMock.mockImplementation(() => Promise.resolve("ok"));
   });
 
   test("acks escalation on thumbs up reaction", async () => {

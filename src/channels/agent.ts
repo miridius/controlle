@@ -9,6 +9,8 @@ import { exec } from "../exec";
 import { log } from "../log";
 import { reportError } from "../error-handler";
 
+export const retryConfig = { attempts: 3, delayMs: 2000 };
+
 export async function handleAgentInbound(
   ctx: Context,
   label: string,
@@ -20,17 +22,70 @@ export async function handleAgentInbound(
   const from = ctx.from?.username || ctx.from?.first_name || "human";
   await log(label, "in", from, text);
 
-  const wrapped = `<telegram><message from="${escapeXml(from)}">${escapeXml(text)}</message></telegram>`;
+  const msgId = ctx.message?.message_id;
+  const threadId = ctx.message?.message_thread_id;
+
+  // In forum topics, every message has reply_to pointing to the topic root.
+  // Filter that out so only real replies show reply_to.
+  const replyToMsg = ctx.message?.reply_to_message;
+  const replyTo =
+    replyToMsg && replyToMsg.message_id !== threadId
+      ? replyToMsg.message_id
+      : undefined;
+
+  // Extract quote text (Telegram quote feature) and reply context
+  const quote = (ctx.message as unknown as Record<string, unknown>)?.quote as
+    | { text?: string }
+    | undefined;
+  const quoteText = quote?.text;
+  const replyContext =
+    replyTo && replyToMsg && "text" in replyToMsg
+      ? (replyToMsg as { text?: string }).text
+      : undefined;
+
+  // Build nudge XML
+  let wrapped = "<telegram>";
+  let msgAttrs = `from="${escapeXml(from)}" msg_id="${msgId}"`;
+  if (replyTo) msgAttrs += ` reply_to="${replyTo}"`;
+  wrapped += `<message ${msgAttrs}>${escapeXml(text)}</message>`;
+  if (quoteText) wrapped += `<quote>${escapeXml(quoteText)}</quote>`;
+  if (replyContext)
+    wrapped += `<reply-context>${escapeXml(replyContext)}</reply-context>`;
+  wrapped += `<ack-cmd>bin/tg-ack ${msgId}</ack-cmd>`;
+  wrapped += "</telegram>";
 
   try {
-    await exec("gt", ["nudge", session, "--stdin"], { stdin: wrapped });
+    await execWithRetry("gt", ["nudge", session, "--stdin"], {
+      stdin: wrapped,
+    });
     await ctx.react("👍");
   } catch (err) {
     reportError(label, err);
     await ctx.reply(`Failed to deliver message to ${label}.`, {
-      message_thread_id: ctx.message?.message_thread_id,
+      message_thread_id: threadId,
     });
   }
+}
+
+async function execWithRetry(
+  cmd: string,
+  args: string[],
+  opts?: { stdin?: string; timeout?: number },
+): Promise<string> {
+  for (let attempt = 1; attempt <= retryConfig.attempts; attempt++) {
+    try {
+      return await exec(cmd, args, opts);
+    } catch (err) {
+      if (attempt === retryConfig.attempts) throw err;
+      await sleep(retryConfig.delayMs);
+    }
+  }
+  // Unreachable, but satisfies TypeScript
+  throw new Error("retry exhausted");
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function escapeXml(s: string): string {
