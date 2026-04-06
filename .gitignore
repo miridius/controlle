@@ -8,3 +8,9 @@ data/
 .runtime/
 .stryker-tmp/
 reports/
+
+# Gas Town (added by gt)
+.logs/
+__pycache__/
+state.json
+CLAUDE.md
