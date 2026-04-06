@@ -1,10 +1,11 @@
 /**
- * Cross-cutting error handler: reports all gateway errors to the Escalations topic.
+ * Cross-cutting error handler: reports HIGH/CRITICAL errors to the Escalations topic.
+ * MEDIUM errors are logged to console only (too noisy for the topic).
  *
  * Severity levels:
- * - medium: recoverable errors (handler failures, transient issues)
- * - high: repeated failures (same source errors within time window)
- * - critical: uncaught exceptions / unhandled rejections
+ * - medium: recoverable errors (handler failures, transient issues) — console only
+ * - high: repeated failures (same source errors within time window) — escalated
+ * - critical: uncaught exceptions / unhandled rejections — escalated
  */
 import { send } from "./outbound";
 import { gateway } from "./config";
@@ -56,9 +57,9 @@ function formatError(err: unknown): string {
 }
 
 /**
- * Report an error to the Escalations topic.
+ * Report an error. Only HIGH and CRITICAL are posted to the Escalations topic;
+ * MEDIUM errors are logged to console only.
  *
- * Logs to console.error as before, then posts to the Escalations topic.
  * Failures in reporting itself are swallowed (logged only) to avoid loops.
  */
 export async function reportError(
@@ -70,6 +71,10 @@ export async function reportError(
   console.error(`[${source}]`, err);
 
   const effective = effectiveSeverity(source, severity);
+
+  // Only post to Escalations topic for high and critical severity
+  if (effective === "medium") return;
+
   const icon = severityIcon(effective);
 
   const text = [
@@ -93,6 +98,7 @@ export async function reportError(
 /**
  * Report an error directly via Telegram HTTP API (for use in outbound-cli
  * where the grammy bot API is not available).
+ * Only HIGH and CRITICAL are posted; MEDIUM errors are logged to console only.
  */
 export async function reportErrorDirect(
   botToken: string,
@@ -103,6 +109,11 @@ export async function reportErrorDirect(
   severity: Severity = "medium",
 ): Promise<void> {
   const message = formatError(err);
+  console.error(`[${source}]`, err);
+
+  // Only post to Escalations for high and critical severity
+  if (severity === "medium") return;
+
   const icon = severityIcon(severity);
 
   const text = [
