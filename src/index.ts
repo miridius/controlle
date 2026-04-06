@@ -11,6 +11,15 @@
  */
 import { createBot } from "./telegram";
 import { startAgentLogWatcher } from "./agent-log-watcher";
+import { reportError } from "./error-handler";
+
+// --- Uncaught exception / unhandled rejection handlers ---
+process.on("uncaughtException", (err) => {
+  reportError("uncaught-exception", err, "critical");
+});
+process.on("unhandledRejection", (reason) => {
+  reportError("unhandled-rejection", reason, "critical");
+});
 
 const bot = createBot();
 

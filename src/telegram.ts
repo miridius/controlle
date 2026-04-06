@@ -12,6 +12,7 @@ import { handleEscalationReaction } from "./channels/escalations";
 import { handleMailInboxInbound } from "./channels/mail-inbox";
 import { handleCrewInbound } from "./channels/crew";
 import { setApi } from "./outbound";
+import { reportError } from "./error-handler";
 
 export function createBot(): Bot {
   const bot = new Bot(env.telegramBotToken);
@@ -108,7 +109,7 @@ export function createBot(): Bot {
 
   // --- Error handler ---
   bot.catch((err) => {
-    console.error("[gateway] Bot error:", err);
+    reportError("bot", err.error ?? err, "medium");
   });
 
   return bot;

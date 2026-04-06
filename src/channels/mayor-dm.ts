@@ -8,6 +8,7 @@ import type { Context } from "grammy";
 import { exec } from "../exec";
 import { log } from "../log";
 import { gateway } from "../config";
+import { reportError } from "../error-handler";
 
 export async function handleMayorInbound(ctx: Context): Promise<void> {
   const text = ctx.message?.text;
@@ -23,7 +24,7 @@ export async function handleMayorInbound(ctx: Context): Promise<void> {
     await exec("gt", ["nudge", session, "--stdin"], { stdin: wrapped });
     await ctx.react("👍");
   } catch (err) {
-    console.error("Failed to nudge mayor:", err);
+    reportError("mayor-dm", err);
     await ctx.reply("Failed to deliver message to mayor.", {
       message_thread_id: ctx.message?.message_thread_id,
     });

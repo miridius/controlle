@@ -7,6 +7,7 @@
 import type { Context } from "grammy";
 import { exec } from "../exec";
 import { log } from "../log";
+import { reportError } from "../error-handler";
 
 export async function handleCrewInbound(
   ctx: Context,
@@ -25,7 +26,7 @@ export async function handleCrewInbound(
     await exec("gt", ["nudge", session, "--stdin"], { stdin: wrapped });
     await ctx.react("👍");
   } catch (err) {
-    console.error(`Failed to nudge crew/${crewName}:`, err);
+    reportError(`crew/${crewName}`, err);
     await ctx.reply(`Failed to deliver message to crew/${crewName}.`, {
       message_thread_id: ctx.message?.message_thread_id,
     });

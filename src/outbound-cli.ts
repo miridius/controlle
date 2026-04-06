@@ -12,6 +12,7 @@
  */
 import { env, gateway } from "./config";
 import { persistMailMapping, persistEscalationMapping } from "./msg-map";
+import { reportErrorDirect } from "./error-handler";
 
 const TELEGRAM_API = `https://api.telegram.org/bot${env.telegramBotToken}`;
 const SUPERGROUP_CHAT_ID = gateway.supergroup_chat_id;
@@ -149,7 +150,14 @@ function escapeHtml(s: string): string {
     .replace(/>/g, "&gt;");
 }
 
-main().catch((err) => {
+main().catch(async (err) => {
   console.error(err);
+  await reportErrorDirect(
+    env.telegramBotToken,
+    SUPERGROUP_CHAT_ID,
+    gateway.topics.escalations.thread_id,
+    "outbound-cli",
+    err,
+  );
   process.exit(1);
 });

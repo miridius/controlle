@@ -8,6 +8,7 @@ import type { Context } from "grammy";
 import { exec } from "../exec";
 import { log } from "../log";
 import { persistMailMapping, lookupMailMapping } from "../msg-map";
+import { reportError } from "../error-handler";
 
 /** In-memory cache: Telegram message_id → GT mail message ID */
 const msgToMailId = new Map<number, string>();
@@ -51,7 +52,7 @@ export async function handleMailInboxInbound(ctx: Context): Promise<void> {
     await exec("gt", ["mail", "reply", mailId, "--stdin"], { stdin: text });
     await ctx.react("👍");
   } catch (err) {
-    console.error(`Failed to reply to mail ${mailId}:`, err);
+    reportError(`mail-inbox/${mailId}`, err);
     await ctx.reply(`Failed to send reply to mail ${mailId}.`, {
       message_thread_id: threadId,
     });

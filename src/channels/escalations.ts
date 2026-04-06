@@ -10,6 +10,7 @@ import type { Context } from "grammy";
 import { exec } from "../exec";
 import { log } from "../log";
 import { persistEscalationMapping, lookupEscalationMapping } from "../msg-map";
+import { reportError } from "../error-handler";
 
 /** In-memory cache: Telegram message_id → GT escalation bead ID */
 const msgToEscalation = new Map<number, string>();
@@ -42,7 +43,7 @@ export async function handleEscalationReaction(ctx: Context): Promise<void> {
     try {
       await exec("gt", ["escalate", "ack", escalationId]);
     } catch (err) {
-      console.error(`Failed to ack escalation ${escalationId}:`, err);
+      reportError(`escalations/ack/${escalationId}`, err);
     }
   }
 
@@ -57,7 +58,7 @@ export async function handleEscalationReaction(ctx: Context): Promise<void> {
         `Resolved via Telegram by ${from}`,
       ]);
     } catch (err) {
-      console.error(`Failed to close escalation ${escalationId}:`, err);
+      reportError(`escalations/close/${escalationId}`, err);
     }
   }
 }

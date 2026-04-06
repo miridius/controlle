@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { send } from "./outbound";
 import { agentLogChannels } from "./config";
+import { reportError } from "./error-handler";
 
 const POLL_INTERVAL_MS = 2000;
 const MAX_MESSAGE_LENGTH = 4000; // Telegram limit ~4096
@@ -142,10 +143,7 @@ async function pollChannel(channel: {
           disablePreview: true,
         });
       } catch (err) {
-        console.error(
-          `[agent-log] Failed to send to ${channel.label}:`,
-          err,
-        );
+        reportError(`agent-log/${channel.label}`, err);
       }
     }
   }
@@ -165,7 +163,11 @@ export function startAgentLogWatcher(): void {
 
   setInterval(async () => {
     for (const channel of channels) {
-      await pollChannel(channel);
+      try {
+        await pollChannel(channel);
+      } catch (err) {
+        reportError(`agent-log/poll/${channel.label}`, err);
+      }
     }
   }, POLL_INTERVAL_MS);
 }
