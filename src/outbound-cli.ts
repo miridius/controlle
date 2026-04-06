@@ -83,7 +83,9 @@ async function main(): Promise<void> {
       ]
         .filter((l) => l !== null)
         .join("\n");
-      const escMsgId = await telegramSend(gateway.topics.escalations.thread_id, text, "HTML");
+      const escTopic = gateway.topics.escalations;
+      if (!escTopic) throw new Error("No 'escalations' topic in config");
+      const escMsgId = await telegramSend(escTopic.thread_id, text, "HTML");
       persistEscalationMapping(escMsgId, id);
       console.log(`Escalation ${id} sent to Telegram (msg ${escMsgId}).`);
       break;
@@ -107,7 +109,9 @@ async function main(): Promise<void> {
         "",
         "Reply to this message to respond.",
       ].join("\n");
-      const mailMsgId = await telegramSend(gateway.topics.mail_inbox.thread_id, text, "HTML");
+      const mailTopic = gateway.topics.mail_inbox;
+      if (!mailTopic) throw new Error("No 'mail_inbox' topic in config");
+      const mailMsgId = await telegramSend(mailTopic.thread_id, text, "HTML");
       persistMailMapping(mailMsgId, mailId);
       console.log(`Mail ${mailId} sent to Telegram (msg ${mailMsgId}).`);
       break;
@@ -155,7 +159,7 @@ main().catch(async (err) => {
   await reportErrorDirect(
     env.telegramBotToken,
     SUPERGROUP_CHAT_ID,
-    gateway.topics.escalations.thread_id,
+    gateway.topics.escalations?.thread_id ?? 0,
     "outbound-cli",
     err,
   );

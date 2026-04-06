@@ -3,14 +3,15 @@
  *
  * Routes messages to the appropriate channel handler based on
  * message_thread_id (forum topic) within the single supergroup.
+ * Topics with a session are agent topics (generic nudge handler).
+ * Escalations and mail_inbox have specialized inbound handling.
  * Unrecognized topics or chats are ignored with a log message.
  */
 import { Bot } from "grammy";
 import { env, resolveChannel, supergroupChatId } from "./config";
-import { handleMayorInbound } from "./channels/mayor-dm";
+import { handleAgentInbound } from "./channels/agent";
 import { handleEscalationReaction } from "./channels/escalations";
 import { handleMailInboxInbound } from "./channels/mail-inbox";
-import { handleCrewInbound } from "./channels/crew";
 import { setApi } from "./outbound";
 import { reportError } from "./error-handler";
 
@@ -50,23 +51,21 @@ export function createBot(): Bot {
       return;
     }
 
-    switch (channel.type) {
-      case "mayor":
-        await handleMayorInbound(ctx);
-        break;
-      case "mail_inbox":
-        await handleMailInboxInbound(ctx);
-        break;
-      case "crew":
-        await handleCrewInbound(ctx, channel.crewName!, channel.session!);
-        break;
-      case "escalations":
-        // Escalations topic is outbound-only for text; inbound is reactions
-        await ctx.reply(
-          "This topic is for escalation alerts. Use reactions to respond.",
-          { message_thread_id: threadId },
-        );
-        break;
+    if (channel.isEscalations) {
+      // Escalations topic is outbound-only for text; inbound is reactions
+      await ctx.reply(
+        "This topic is for escalation alerts. Use reactions to respond.",
+        { message_thread_id: threadId },
+      );
+    } else if (channel.isMailInbox) {
+      await handleMailInboxInbound(ctx);
+    } else if (channel.session) {
+      // Any topic with a session is an agent topic
+      await handleAgentInbound(ctx, channel.label, channel.session);
+    } else {
+      console.log(
+        `[gateway] Topic "${channel.label}" has no session configured, ignoring message`,
+      );
     }
   });
 
@@ -96,7 +95,7 @@ export function createBot(): Bot {
     const channel = resolveChannel(threadId);
     if (channel) {
       await ctx.reply(
-        `This topic is mapped to: ${channel.type}${channel.crewName ? ` (${channel.crewName})` : ""}`,
+        `This topic is mapped to: ${channel.label}`,
         { message_thread_id: threadId },
       );
     } else {

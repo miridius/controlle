@@ -1,5 +1,5 @@
 /**
- * Tests for channel handlers: mayor, crew, mail-inbox, escalations.
+ * Tests for channel handlers: agent (generic), mail-inbox, escalations.
  *
  * Mocks exec() to avoid real shell commands and grammy Context for message handling.
  */
@@ -30,8 +30,7 @@ mock.module("../msg-map", () => ({
   lookupEscalationMapping: mock((id: number) => testEscMap.get(String(id))),
 }));
 
-import { handleMayorInbound } from "../channels/mayor-dm";
-import { handleCrewInbound } from "../channels/crew";
+import { handleAgentInbound } from "../channels/agent";
 import {
   handleMailInboxInbound,
   trackMailMessage,
@@ -77,19 +76,20 @@ function createMockCtx(overrides: Record<string, unknown> = {}) {
   };
 }
 
-describe("handleMayorInbound", () => {
+describe("handleAgentInbound (mayor)", () => {
   beforeEach(() => {
     execMock.mockClear();
   });
 
-  test("wraps message in XML and nudges mayor session", async () => {
+  test("wraps message in XML and nudges session", async () => {
     const ctx = createMockCtx();
-    await handleMayorInbound(ctx as never);
+    await handleAgentInbound(ctx as never, "mayor", "gt-mayor");
 
     expect(execMock).toHaveBeenCalledTimes(1);
     const call = getCall(0);
     expect(call[0]).toBe("gt");
     expect(call[1][0]).toBe("nudge");
+    expect(call[1][1]).toBe("gt-mayor");
     expect(call[1]).toContain("--stdin");
     expect(call[2].stdin).toContain("<telegram>");
     expect(call[2].stdin).toContain('from="testuser"');
@@ -99,7 +99,7 @@ describe("handleMayorInbound", () => {
 
   test("reacts with thumbs up on success", async () => {
     const ctx = createMockCtx();
-    await handleMayorInbound(ctx as never);
+    await handleAgentInbound(ctx as never, "mayor", "gt-mayor");
     expect(ctx.react).toHaveBeenCalledWith("👍");
   });
 
@@ -108,7 +108,7 @@ describe("handleMayorInbound", () => {
       Promise.reject(new Error("nudge failed")),
     );
     const ctx = createMockCtx();
-    await handleMayorInbound(ctx as never);
+    await handleAgentInbound(ctx as never, "mayor", "gt-mayor");
     expect(ctx.reply).toHaveBeenCalled();
     const replyCall = ctx.reply.mock.calls[0] as unknown as [string, Record<string, unknown>];
     expect(replyCall[0]).toBe("Failed to deliver message to mayor.");
@@ -118,7 +118,7 @@ describe("handleMayorInbound", () => {
 
   test("returns early if no text in message", async () => {
     const ctx = createMockCtx({ message: { text: undefined } });
-    await handleMayorInbound(ctx as never);
+    await handleAgentInbound(ctx as never, "mayor", "gt-mayor");
     expect(execMock).not.toHaveBeenCalled();
   });
 
@@ -126,7 +126,7 @@ describe("handleMayorInbound", () => {
     const ctx = createMockCtx({
       message: { text: 'hello <world> & "quotes"' },
     });
-    await handleMayorInbound(ctx as never);
+    await handleAgentInbound(ctx as never, "mayor", "gt-mayor");
     const stdin = getCall(0)[2].stdin;
     expect(stdin).toContain("&lt;world&gt;");
     expect(stdin).toContain("&amp;");
@@ -136,20 +136,20 @@ describe("handleMayorInbound", () => {
 
   test("falls back to first_name when username missing", async () => {
     const ctx = createMockCtx({ from: { first_name: "Alice" } });
-    await handleMayorInbound(ctx as never);
+    await handleAgentInbound(ctx as never, "mayor", "gt-mayor");
     const stdin = getCall(0)[2].stdin;
     expect(stdin).toContain('from="Alice"');
   });
 });
 
-describe("handleCrewInbound", () => {
+describe("handleAgentInbound (crew)", () => {
   beforeEach(() => {
     execMock.mockClear();
   });
 
   test("nudges correct session with wrapped XML", async () => {
     const ctx = createMockCtx();
-    await handleCrewInbound(ctx as never, "sam", "co-crew-sam");
+    await handleAgentInbound(ctx as never, "crew/sam", "co-crew-sam");
 
     expect(execMock).toHaveBeenCalledTimes(1);
     const call = getCall(0);
@@ -161,7 +161,7 @@ describe("handleCrewInbound", () => {
 
   test("reacts with thumbs up on success", async () => {
     const ctx = createMockCtx();
-    await handleCrewInbound(ctx as never, "sam", "co-crew-sam");
+    await handleAgentInbound(ctx as never, "crew/sam", "co-crew-sam");
     expect(ctx.react).toHaveBeenCalledWith("👍");
   });
 
@@ -170,7 +170,7 @@ describe("handleCrewInbound", () => {
       Promise.reject(new Error("failed")),
     );
     const ctx = createMockCtx();
-    await handleCrewInbound(ctx as never, "sam", "co-crew-sam");
+    await handleAgentInbound(ctx as never, "crew/sam", "co-crew-sam");
     expect(ctx.reply).toHaveBeenCalled();
     const replyCall = ctx.reply.mock.calls[0] as unknown as [string, Record<string, unknown>];
     expect(replyCall[0]).toBe("Failed to deliver message to crew/sam.");
@@ -178,13 +178,13 @@ describe("handleCrewInbound", () => {
 
   test("returns early if no text", async () => {
     const ctx = createMockCtx({ message: { text: undefined } });
-    await handleCrewInbound(ctx as never, "sam", "co-crew-sam");
+    await handleAgentInbound(ctx as never, "crew/sam", "co-crew-sam");
     expect(execMock).not.toHaveBeenCalled();
   });
 
-  test("escapes XML in crew messages", async () => {
+  test("escapes XML in messages", async () => {
     const ctx = createMockCtx({ message: { text: "<script>xss</script>" } });
-    await handleCrewInbound(ctx as never, "sam", "co-crew-sam");
+    await handleAgentInbound(ctx as never, "crew/sam", "co-crew-sam");
     const stdin = getCall(0)[2].stdin;
     expect(stdin).toContain("&lt;script&gt;");
     expect(stdin).not.toContain("<script>");

@@ -26,12 +26,7 @@ export interface TopicChannel {
 
 export interface GatewayConfig {
   supergroup_chat_id: number;
-  topics: {
-    mayor: TopicChannel & { session: string };
-    escalations: TopicChannel;
-    mail_inbox: TopicChannel;
-    crew: Record<string, TopicChannel & { session: string }>;
-  };
+  topics: Record<string, TopicChannel>;
 }
 
 const configPath = join(import.meta.dir, "..", "gateway.config.json");
@@ -41,44 +36,31 @@ export const gateway: GatewayConfig = JSON.parse(
 
 // --- Lookup helpers ---
 
-export type ChannelType = "mayor" | "escalations" | "mail_inbox" | "crew";
+/** Special topic names that have custom inbound handling */
+const SPECIAL_TOPICS = new Set(["escalations", "mail_inbox"]);
 
 export interface ResolvedChannel {
-  type: ChannelType;
-  crewName?: string;
-  session?: string;
+  /** Topic label from config key (e.g. "mayor", "crew/sam") */
+  label: string;
   threadId: number;
+  session?: string;
+  /** True for escalations topic */
+  isEscalations: boolean;
+  /** True for mail_inbox topic */
+  isMailInbox: boolean;
 }
 
 const threadIdMap = new Map<number, ResolvedChannel>();
 
 function buildThreadIdMap(): void {
-  if (gateway.topics.mayor.thread_id) {
-    threadIdMap.set(gateway.topics.mayor.thread_id, {
-      type: "mayor",
-      session: gateway.topics.mayor.session,
-      threadId: gateway.topics.mayor.thread_id,
-    });
-  }
-  if (gateway.topics.escalations.thread_id) {
-    threadIdMap.set(gateway.topics.escalations.thread_id, {
-      type: "escalations",
-      threadId: gateway.topics.escalations.thread_id,
-    });
-  }
-  if (gateway.topics.mail_inbox.thread_id) {
-    threadIdMap.set(gateway.topics.mail_inbox.thread_id, {
-      type: "mail_inbox",
-      threadId: gateway.topics.mail_inbox.thread_id,
-    });
-  }
-  for (const [name, ch] of Object.entries(gateway.topics.crew)) {
+  for (const [label, ch] of Object.entries(gateway.topics)) {
     if (ch.thread_id) {
       threadIdMap.set(ch.thread_id, {
-        type: "crew",
-        crewName: name,
-        session: ch.session,
+        label,
         threadId: ch.thread_id,
+        session: ch.session,
+        isEscalations: label === "escalations",
+        isMailInbox: label === "mail_inbox",
       });
     }
   }
@@ -109,21 +91,13 @@ export function agentLogChannels(): Array<{
     projectDir: string | undefined;
     label: string;
   }> = [];
-  if (gateway.topics.mayor.agent_log) {
-    results.push({
-      threadId: gateway.topics.mayor.thread_id,
-      session: gateway.topics.mayor.session,
-      projectDir: gateway.topics.mayor.project_dir,
-      label: "mayor",
-    });
-  }
-  for (const [name, ch] of Object.entries(gateway.topics.crew)) {
-    if (ch.agent_log) {
+  for (const [label, ch] of Object.entries(gateway.topics)) {
+    if (ch.agent_log && ch.session) {
       results.push({
         threadId: ch.thread_id,
         session: ch.session,
         projectDir: ch.project_dir,
-        label: `crew/${name}`,
+        label,
       });
     }
   }

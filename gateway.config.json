@@ -14,13 +14,11 @@
     "mail_inbox": {
       "thread_id": 0
     },
-    "crew": {
-      "sam": {
-        "thread_id": 0,
-        "session": "co-crew-sam",
-        "agent_log": true,
-        "project_dir": "-gt-controlle-crew-sam"
-      }
+    "crew/sam": {
+      "thread_id": 0,
+      "session": "co-crew-sam",
+      "agent_log": true,
+      "project_dir": "-gt-controlle-crew-sam"
     }
   }
 }
