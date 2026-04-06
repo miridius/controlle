@@ -78,6 +78,30 @@ export function supergroupChatId(): number {
   return gateway.supergroup_chat_id;
 }
 
+/**
+ * Resolve an error source string to the responsible agent's session.
+ * Strips known prefixes (e.g. "agent-log/", "agent-log/poll/") and
+ * matches the remainder against topic labels with sessions.
+ * Returns undefined if no responsible agent can be identified.
+ */
+export function resolveSessionForSource(source: string): string | undefined {
+  // Strip known prefixes to get the topic label
+  const prefixes = ["agent-log/poll/", "agent-log/"];
+  let label = source;
+  for (const prefix of prefixes) {
+    if (label.startsWith(prefix)) {
+      label = label.slice(prefix.length);
+      break;
+    }
+  }
+
+  // Direct match: source (or stripped label) matches a topic with a session
+  const topic = gateway.topics[label];
+  if (topic?.session) return topic.session;
+
+  return undefined;
+}
+
 /** Get all channels that have agent_log streaming enabled */
 export function agentLogChannels(): Array<{
   threadId: number;

@@ -1,14 +1,21 @@
 /**
- * Cross-cutting error handler: reports HIGH/CRITICAL errors to the Escalations topic.
- * MEDIUM errors are logged to console only (too noisy for the topic).
+ * Cross-cutting error handler: agent-first, human-last.
+ *
+ * When an error reaches HIGH or CRITICAL severity:
+ * 1. Nudge the responsible agent (if identifiable from error source)
+ * 2. Only escalate to the Telegram Escalations topic if no agent can be
+ *    reached or the source has no responsible agent.
+ *
+ * MEDIUM errors are logged to console only (too noisy for agents or humans).
  *
  * Severity levels:
  * - medium: recoverable errors (handler failures, transient issues) — console only
- * - high: repeated failures (same source errors within time window) — escalated
- * - critical: uncaught exceptions / unhandled rejections — escalated
+ * - high: repeated failures (same source errors within time window) — agent nudge, then escalation
+ * - critical: uncaught exceptions / unhandled rejections — agent nudge, then escalation
  */
 import { send } from "./outbound";
-import { gateway } from "./config";
+import { gateway, resolveSessionForSource } from "./config";
+import { exec } from "./exec";
 
 type Severity = "medium" | "high" | "critical";
 
@@ -57,8 +64,40 @@ function formatError(err: unknown): string {
 }
 
 /**
- * Report an error. Only HIGH and CRITICAL are posted to the Escalations topic;
- * MEDIUM errors are logged to console only.
+ * Try to nudge the responsible agent with error details.
+ * Returns true if the agent was successfully nudged.
+ */
+async function nudgeResponsibleAgent(
+  source: string,
+  severity: Severity,
+  message: string,
+): Promise<boolean> {
+  const session = resolveSessionForSource(source);
+  if (!session) return false;
+
+  const nudgeText = [
+    `<system-reminder>`,
+    `[gateway-error] severity=${severity} source=${source}`,
+    message,
+    `</system-reminder>`,
+  ].join("\n");
+
+  try {
+    await exec("gt", ["nudge", session, "--stdin"], { stdin: nudgeText });
+    console.log(`[error-handler] Nudged agent ${session} about ${source} error`);
+    return true;
+  } catch {
+    console.error(`[error-handler] Failed to nudge agent ${session}, falling back to escalation`);
+    return false;
+  }
+}
+
+/**
+ * Report an error. Agent-first routing: tries to nudge the responsible agent
+ * before escalating to the Telegram Escalations topic.
+ *
+ * - MEDIUM: console only
+ * - HIGH/CRITICAL: nudge agent → if unreachable or no agent, post to Escalations
  *
  * Failures in reporting itself are swallowed (logged only) to avoid loops.
  */
@@ -72,9 +111,14 @@ export async function reportError(
 
   const effective = effectiveSeverity(source, severity);
 
-  // Only post to Escalations topic for high and critical severity
+  // Only escalate for high and critical severity
   if (effective === "medium") return;
 
+  // Agent-first: try to nudge the responsible agent
+  const agentNotified = await nudgeResponsibleAgent(source, effective, message);
+  if (agentNotified) return;
+
+  // No agent found or nudge failed — fall back to Escalations topic
   const icon = severityIcon(effective);
 
   const text = [
@@ -98,7 +142,9 @@ export async function reportError(
 /**
  * Report an error directly via Telegram HTTP API (for use in outbound-cli
  * where the grammy bot API is not available).
- * Only HIGH and CRITICAL are posted; MEDIUM errors are logged to console only.
+ * Agent-first: tries to nudge the responsible agent before falling back
+ * to the Telegram Escalations topic via direct HTTP API.
+ * MEDIUM errors are logged to console only.
  */
 export async function reportErrorDirect(
   botToken: string,
@@ -111,9 +157,14 @@ export async function reportErrorDirect(
   const message = formatError(err);
   console.error(`[${source}]`, err);
 
-  // Only post to Escalations for high and critical severity
+  // Only escalate for high and critical severity
   if (severity === "medium") return;
 
+  // Agent-first: try to nudge the responsible agent
+  const agentNotified = await nudgeResponsibleAgent(source, severity, message);
+  if (agentNotified) return;
+
+  // No agent found or nudge failed — fall back to direct Telegram API
   const icon = severityIcon(severity);
 
   const text = [

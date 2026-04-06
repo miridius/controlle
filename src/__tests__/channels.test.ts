@@ -113,7 +113,7 @@ describe("handleAgentInbound (mayor)", () => {
     expect(ctx.react).toHaveBeenCalledWith("👍");
   });
 
-  test("replies with error after all retries exhausted", async () => {
+  test("silently handles error after all retries exhausted (no user-visible reply)", async () => {
     execMock.mockImplementation(() =>
       Promise.reject(new Error("nudge failed")),
     );
@@ -121,11 +121,8 @@ describe("handleAgentInbound (mayor)", () => {
     await handleAgentInbound(ctx as never, "mayor", "gt-mayor");
     // Should have retried 3 times
     expect(execMock).toHaveBeenCalledTimes(3);
-    expect(ctx.reply).toHaveBeenCalled();
-    const replyCall = ctx.reply.mock.calls[0] as unknown as [string, Record<string, unknown>];
-    expect(replyCall[0]).toBe("Failed to deliver message to mayor.");
-    // Should include thread_id in reply
-    expect(replyCall[1]).toEqual({ message_thread_id: 100 });
+    // Should NOT reply with error in Telegram (agent-first error routing)
+    expect(ctx.reply).not.toHaveBeenCalled();
   });
 
   test("retries on transient failure then succeeds", async () => {
@@ -246,16 +243,15 @@ describe("handleAgentInbound (crew)", () => {
     expect(ctx.react).toHaveBeenCalledWith("👍");
   });
 
-  test("replies with error after retries exhausted", async () => {
+  test("silently handles error after retries exhausted (no user-visible reply)", async () => {
     execMock.mockImplementation(() =>
       Promise.reject(new Error("failed")),
     );
     const ctx = createMockCtx();
     await handleAgentInbound(ctx as never, "crew/sam", "co-crew-sam");
     expect(execMock).toHaveBeenCalledTimes(3);
-    expect(ctx.reply).toHaveBeenCalled();
-    const replyCall = ctx.reply.mock.calls[0] as unknown as [string, Record<string, unknown>];
-    expect(replyCall[0]).toBe("Failed to deliver message to crew/sam.");
+    // Should NOT reply with error in Telegram (agent-first error routing)
+    expect(ctx.reply).not.toHaveBeenCalled();
   });
 
   test("returns early if no text", async () => {
