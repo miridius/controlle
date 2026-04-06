@@ -12,6 +12,14 @@ mock.module("../log", () => ({
   log: mock(() => Promise.resolve()),
 }));
 
+// Mock msg-map to avoid file I/O
+mock.module("../msg-map", () => ({
+  persistMailMapping: mock(),
+  lookupMailMapping: mock(),
+  persistEscalationMapping: mock(),
+  lookupEscalationMapping: mock(),
+}));
+
 function createMockApi() {
   const sentMessages: Array<{
     chatId: number;
@@ -90,25 +98,31 @@ describe("send", () => {
   });
 
   test("tracks escalation when escalationId provided", async () => {
-    const { api } = createMockApi();
+    const { api, sentMessages } = createMockApi();
     setApi(api as never);
 
     const msgId = await send(42, "esc", {
       channel: "escalations",
       escalationId: "esc-001",
     });
-    expect(msgId).toBeGreaterThanOrEqual(100);
+    expect(msgId).toBe(100);
+    // Verify the message was actually sent
+    expect(sentMessages).toHaveLength(1);
+    expect(sentMessages[0].text).toBe("esc");
   });
 
   test("tracks mail when mailId provided", async () => {
-    const { api } = createMockApi();
+    const { api, sentMessages } = createMockApi();
     setApi(api as never);
 
     const msgId = await send(42, "mail", {
       channel: "mail_inbox",
       mailId: "mail-001",
     });
-    expect(msgId).toBeGreaterThanOrEqual(100);
+    expect(msgId).toBe(100);
+    // Verify the message was actually sent
+    expect(sentMessages).toHaveLength(1);
+    expect(sentMessages[0].text).toBe("mail");
   });
 });
 

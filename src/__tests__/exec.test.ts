@@ -39,6 +39,6 @@ describe("exec", () => {
   test("respects timeout", async () => {
     await expect(
       exec("sleep", ["10"], { timeout: 100 }),
-    ).rejects.toThrow();
+    ).rejects.toThrow(/exited|timed out|killed/i);
   });
 });
