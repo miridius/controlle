@@ -121,16 +121,18 @@ async function pollChannel(channel: {
   projectDir: string | undefined;
   label: string;
 }): Promise<void> {
-  // Try to find the session file
   let state = watchers.get(channel.session);
 
-  if (!state) {
-    const filePath = await findSessionJsonl(channel.session, channel.projectDir);
-    if (!filePath) return; // no session file yet
-    const st = await stat(filePath);
-    state = { filePath, offset: st.size }; // start from end (don't replay history)
+  // Always check for a newer session file (handles handoffs)
+  const newestPath = await findSessionJsonl(channel.session, channel.projectDir);
+  if (!newestPath) return; // no session file yet
+
+  if (!state || state.filePath !== newestPath) {
+    // New file discovered — start from end (don't replay history)
+    const st = await stat(newestPath);
+    state = { filePath: newestPath, offset: st.size };
     watchers.set(channel.session, state);
-    console.log(`[agent-log] Watching ${channel.label}: ${filePath}`);
+    console.log(`[agent-log] Watching ${channel.label}: ${newestPath}`);
   }
 
   const lines = await readNewLines(state);
