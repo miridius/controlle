@@ -29,15 +29,20 @@ export interface SendOptions {
   disablePreview?: boolean;
 }
 
+export interface SendResult {
+  messageId: number;
+  entities?: Array<{ type: string }>;
+}
+
 /**
  * Send a message to a forum topic in the supergroup.
- * Returns the Telegram message_id for tracking.
+ * Returns the Telegram message_id and entity info for observability.
  */
 export async function send(
   threadId: number,
   text: string,
   opts: SendOptions = { channel: "unknown" },
-): Promise<number> {
+): Promise<SendResult> {
   if (!botApi) {
     throw new Error("Bot API not initialized. Call setApi() first.");
   }
@@ -61,7 +66,8 @@ export async function send(
     trackMailMessage(msg.message_id, opts.mailId);
   }
 
-  return msg.message_id;
+  const entities = msg.entities?.map((e: { type: string }) => ({ type: e.type }));
+  return { messageId: msg.message_id, entities };
 }
 
 /**
@@ -95,11 +101,12 @@ export async function sendEscalation(
     .filter((line) => line !== null)
     .join("\n");
 
-  return send(threadId, text, {
+  const result = await send(threadId, text, {
     channel: "escalations",
     escalationId,
     parseMode: "HTML",
   });
+  return result.messageId;
 }
 
 /**
@@ -122,11 +129,12 @@ export async function sendMailMessage(
     "Reply to this message to respond.",
   ].join("\n");
 
-  return send(threadId, text, {
+  const result = await send(threadId, text, {
     channel: "mail_inbox",
     mailId,
     parseMode: "HTML",
   });
+  return result.messageId;
 }
 
 function escapeHtml(s: string): string {
@@ -155,15 +163,33 @@ export async function sendWithMarkdownFallback(
 ): Promise<number> {
   const escaped = escapeMarkdownV2(text);
   try {
-    return await send(threadId, escaped, {
+    const result = await send(threadId, escaped, {
       ...opts,
       parseMode: "MarkdownV2",
     });
+    const entitySummary = formatEntitySummary(result.entities);
+    console.log(
+      `[agent-log] Sent to ${opts.channel}: 200 OK, msg_id=${result.messageId}${entitySummary}`,
+    );
+    return result.messageId;
   } catch (err) {
     if (err instanceof GrammyError && err.error_code === 400) {
-      // MarkdownV2 rejected — send as plain text
-      return await send(threadId, text, { ...opts, parseMode: undefined });
+      console.log(
+        `[agent-log] MarkdownV2 rejected for ${opts.channel}, falling back to plain text`,
+      );
+      const result = await send(threadId, text, { ...opts, parseMode: undefined });
+      const entitySummary = formatEntitySummary(result.entities);
+      console.log(
+        `[agent-log] Sent to ${opts.channel} (plain text): 200 OK, msg_id=${result.messageId}${entitySummary}`,
+      );
+      return result.messageId;
     }
     throw err;
   }
+}
+
+function formatEntitySummary(entities?: Array<{ type: string }>): string {
+  if (!entities || entities.length === 0) return ", 0 entities";
+  const types = [...new Set(entities.map((e) => e.type))];
+  return `, ${entities.length} entities (${types.join(", ")})`;
 }

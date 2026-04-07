@@ -11,6 +11,7 @@ import {
   sendMailMessage,
   escapeMarkdownV2,
   sendWithMarkdownFallback,
+  type SendResult,
 } from "../outbound";
 import { supergroupChatId } from "../config";
 
@@ -27,7 +28,7 @@ mock.module("../msg-map", () => ({
   lookupEscalationMapping: mock(),
 }));
 
-function createMockApi() {
+function createMockApi(entities?: Array<{ type: string }>) {
   const sentMessages: Array<{
     chatId: number;
     text: string;
@@ -45,7 +46,7 @@ function createMockApi() {
           opts: Record<string, unknown>,
         ) => {
           sentMessages.push({ chatId, text, opts });
-          return { message_id: nextMsgId++ };
+          return { message_id: nextMsgId++, entities };
         },
       ),
     },
@@ -65,8 +66,8 @@ describe("send", () => {
     const { api, sentMessages } = createMockApi();
     setApi(api as never);
 
-    const msgId = await send(42, "hello", { channel: "test" });
-    expect(msgId).toBe(100);
+    const result = await send(42, "hello", { channel: "test" });
+    expect(result.messageId).toBe(100);
     expect(sentMessages).toHaveLength(1);
     // Should send to the supergroup chat_id, not the threadId
     expect(sentMessages[0].chatId).toBe(supergroupChatId());
@@ -108,11 +109,11 @@ describe("send", () => {
     const { api, sentMessages } = createMockApi();
     setApi(api as never);
 
-    const msgId = await send(42, "esc", {
+    const result = await send(42, "esc", {
       channel: "escalations",
       escalationId: "esc-001",
     });
-    expect(msgId).toBe(100);
+    expect(result.messageId).toBe(100);
     // Verify the message was actually sent
     expect(sentMessages).toHaveLength(1);
     expect(sentMessages[0].text).toBe("esc");
@@ -122,11 +123,11 @@ describe("send", () => {
     const { api, sentMessages } = createMockApi();
     setApi(api as never);
 
-    const msgId = await send(42, "mail", {
+    const result = await send(42, "mail", {
       channel: "mail_inbox",
       mailId: "mail-001",
     });
-    expect(msgId).toBe(100);
+    expect(result.messageId).toBe(100);
     // Verify the message was actually sent
     expect(sentMessages).toHaveLength(1);
     expect(sentMessages[0].text).toBe("mail");
@@ -243,6 +244,25 @@ describe("escapeMarkdownV2", () => {
   });
 });
 
+describe("send result", () => {
+  test("returns entities from Telegram response", async () => {
+    const entities = [{ type: "bold" }, { type: "code" }];
+    const { api } = createMockApi(entities);
+    setApi(api as never);
+
+    const result = await send(42, "hello", { channel: "test" });
+    expect(result.entities).toEqual([{ type: "bold" }, { type: "code" }]);
+  });
+
+  test("returns undefined entities when response has none", async () => {
+    const { api } = createMockApi();
+    setApi(api as never);
+
+    const result = await send(42, "hello", { channel: "test" });
+    expect(result.entities).toBeUndefined();
+  });
+});
+
 describe("sendWithMarkdownFallback", () => {
   test("sends with MarkdownV2 when it succeeds", async () => {
     const { api, sentMessages } = createMockApi();
@@ -327,5 +347,73 @@ describe("sendWithMarkdownFallback", () => {
     expect(sentMessages[0].opts.link_preview_options).toEqual({
       is_disabled: true,
     });
+  });
+
+  test("logs entity count and types on successful send", async () => {
+    const entities = [
+      { type: "bold" },
+      { type: "code" },
+      { type: "code_block" },
+    ];
+    const { api } = createMockApi(entities);
+    setApi(api as never);
+
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (...args: unknown[]) => logs.push(args.join(" "));
+
+    try {
+      await sendWithMarkdownFallback(42, "hello", {
+        channel: "crew/sam",
+      });
+    } finally {
+      console.log = origLog;
+    }
+
+    expect(logs.some((l) => l.includes("[agent-log] Sent to crew/sam"))).toBe(true);
+    expect(logs.some((l) => l.includes("3 entities (bold, code, code_block)"))).toBe(true);
+    expect(logs.some((l) => l.includes("msg_id=100"))).toBe(true);
+  });
+
+  test("logs fallback event when MarkdownV2 is rejected", async () => {
+    let callCount = 0;
+    const api = {
+      sendMessage: mock(
+        async (
+          chatId: number,
+          text: string,
+          opts: Record<string, unknown>,
+        ) => {
+          callCount++;
+          if (callCount === 1 && opts.parse_mode === "MarkdownV2") {
+            const { GrammyError } = await import("grammy");
+            throw new GrammyError(
+              "Bad Request: can't parse entities",
+              { ok: false, error_code: 400, description: "Bad Request: can't parse entities" },
+              "sendMessage",
+              { chat_id: chatId, text },
+            );
+          }
+          return { message_id: 200 };
+        },
+      ),
+    };
+    setApi(api as never);
+
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (...args: unknown[]) => logs.push(args.join(" "));
+
+    try {
+      await sendWithMarkdownFallback(42, "bad *markdown", {
+        channel: "crew/sam",
+      });
+    } finally {
+      console.log = origLog;
+    }
+
+    expect(logs.some((l) => l.includes("MarkdownV2 rejected for crew/sam"))).toBe(true);
+    expect(logs.some((l) => l.includes("falling back to plain text"))).toBe(true);
+    expect(logs.some((l) => l.includes("(plain text): 200 OK"))).toBe(true);
   });
 });
