@@ -1,33 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# qa-patrol: Controlle QA patrol — runs health checks and reports issues.
+# qa-patrol: Controlle QA patrol — runs health checks via the registry.
 #
-# Checks:
-#   1. Test suite (bun test)
-#   2. Mutation score (stryker) — optional, slow
-#   3. Controlle process is running
-#   4. Telegram API reachable for all configured topics
-#   5. Nudge delivery works for each configured session
+# All checks are defined in the health-check registry (src/health-checks.ts).
+# Features register their own health contracts at implementation time.
 #
 # Usage:
-#   bin/qa-patrol                  # Run all checks (skip mutation)
+#   bin/qa-patrol                  # Standard checks (quick + tests + nudge)
+#   bin/qa-patrol --quick          # Process + config + connectivity only
 #   bin/qa-patrol --with-mutation  # Include mutation testing (slow)
-#   bin/qa-patrol --quick          # Only process + connectivity checks
 #
-# Reports issues to the Escalations topic via outbound-cli.
+# Reports failures to the Escalations topic via outbound-cli.
 # Exit code: 0 = all checks passed, 1 = one or more checks failed.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
-CONFIG_FILE="${REPO_DIR}/gateway.config.json"
 
-WITH_MUTATION=false
-QUICK=false
+TIER="--standard"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --with-mutation) WITH_MUTATION=true; shift ;;
-    --quick)         QUICK=true; shift ;;
+    --with-mutation) TIER="--slow"; shift ;;
+    --quick)         TIER="--quick"; shift ;;
     -h|--help)
       sed -n '2,/^$/s/^# //p' "$0"
       exit 0
@@ -36,202 +30,5 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# --- Helpers ---
-
-FAILURES=()
-WARNINGS=()
-
-pass() { echo "  PASS: $1"; }
-fail() { echo "  FAIL: $1"; FAILURES+=("$1"); }
-warn() { echo "  WARN: $1"; WARNINGS+=("$1"); }
-
-# --- Check 1: Test suite ---
-
-if [[ "$QUICK" != true ]]; then
-  echo "[qa-patrol] Running test suite..."
-  cd "$REPO_DIR"
-  if bun test 2>&1; then
-    pass "Test suite"
-  else
-    fail "Test suite: bun test failed"
-  fi
-  echo ""
-fi
-
-# --- Check 2: Mutation score (optional) ---
-
-if [[ "$WITH_MUTATION" == true && "$QUICK" != true ]]; then
-  echo "[qa-patrol] Running mutation testing (this takes a while)..."
-  cd "$REPO_DIR"
-  if npx stryker run 2>&1; then
-    # Check if mutation score meets threshold
-    REPORT="${REPO_DIR}/reports/mutation/mutation.json"
-    if [[ -f "$REPORT" ]]; then
-      SCORE=$(bun -e "
-        const r = require('${REPORT}');
-        const f = r.files || {};
-        let killed = 0, total = 0;
-        for (const file of Object.values(f)) {
-          for (const m of file.mutants || []) {
-            total++;
-            if (m.status === 'Killed') killed++;
-          }
-        }
-        console.log(total > 0 ? Math.round(killed / total * 100) : 0);
-      " 2>/dev/null || echo "0")
-      if [[ "$SCORE" -ge 50 ]]; then
-        pass "Mutation score: ${SCORE}% (threshold: 50%)"
-      else
-        fail "Mutation score: ${SCORE}% below threshold (50%)"
-      fi
-    else
-      warn "Mutation report not found at ${REPORT}"
-    fi
-  else
-    fail "Mutation testing: stryker run failed"
-  fi
-  echo ""
-fi
-
-# --- Check 3: Controlle process is running ---
-
-echo "[qa-patrol] Checking Controlle process..."
-
-RUNTIME_DIR="${REPO_DIR}/.runtime"
-LOCK_FILE="${RUNTIME_DIR}/controlle.lock"
-
-if [[ -f "$LOCK_FILE" ]]; then
-  PID=$(cat "$LOCK_FILE" 2>/dev/null || echo "")
-  if [[ -n "$PID" ]] && kill -0 "$PID" 2>/dev/null; then
-    pass "Controlle process running (PID ${PID})"
-  else
-    fail "Controlle lock file exists but process (PID ${PID}) is dead"
-  fi
-else
-  # Also check via pgrep as fallback
-  if pgrep -f "bun.*src/index.ts" > /dev/null 2>&1; then
-    warn "Controlle process running but no lock file found"
-  else
-    fail "Controlle process is not running (no lock file, no matching process)"
-  fi
-fi
-echo ""
-
-# --- Check 4: Telegram API reachable for configured topics ---
-
-echo "[qa-patrol] Checking Telegram API connectivity..."
-
-BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
-if [[ -z "$BOT_TOKEN" ]]; then
-  # Try to extract from tg-ack
-  BOT_TOKEN=$(grep -oP 'bot\K[0-9]+:[A-Za-z0-9_-]+' "${REPO_DIR}/bin/tg-ack" 2>/dev/null || true)
-fi
-
-if [[ -z "$BOT_TOKEN" ]]; then
-  warn "Cannot check Telegram API: no bot token available"
-else
-  CHAT_ID=$(grep -oP '"supergroup_chat_id":\s*\K-?[0-9]+' "$CONFIG_FILE" 2>/dev/null || echo "")
-
-  if [[ -z "$CHAT_ID" ]]; then
-    fail "Cannot read supergroup_chat_id from config"
-  else
-    # Test getChat to verify bot can see the supergroup
-    RESPONSE=$(curl -s -m 10 "https://api.telegram.org/bot${BOT_TOKEN}/getChat?chat_id=${CHAT_ID}" 2>/dev/null || echo '{"ok":false}')
-    if echo "$RESPONSE" | grep -q '"ok":true'; then
-      pass "Telegram API: bot can reach supergroup"
-    else
-      fail "Telegram API: cannot reach supergroup (${CHAT_ID})"
-    fi
-
-    # Verify each topic is reachable by checking getForumTopicIconStickers (lightweight call)
-    # We can't directly check topic existence, but we can verify the bot has forum rights
-    TOPICS=$(bun -e "
-      const config = JSON.parse(require('fs').readFileSync('${CONFIG_FILE}', 'utf-8'));
-      for (const [label, ch] of Object.entries(config.topics)) {
-        console.log(label + ':' + ch.thread_id);
-      }
-    " 2>/dev/null || true)
-
-    if [[ -n "$TOPICS" ]]; then
-      TOPIC_COUNT=$(echo "$TOPICS" | wc -l)
-      pass "Config has ${TOPIC_COUNT} topic(s) configured"
-    else
-      warn "Could not parse topics from config"
-    fi
-  fi
-fi
-echo ""
-
-# --- Check 5: Nudge delivery (verify gt nudge is available) ---
-
-if [[ "$QUICK" != true ]]; then
-  echo "[qa-patrol] Checking nudge delivery capability..."
-
-  if command -v gt &> /dev/null; then
-    pass "gt command available"
-
-    # Check each session's nudge reachability with a dry-run (--help to verify command exists)
-    SESSIONS=$(bun -e "
-      const config = JSON.parse(require('fs').readFileSync('${CONFIG_FILE}', 'utf-8'));
-      for (const [label, ch] of Object.entries(config.topics)) {
-        if (ch.session) console.log(label + ':' + ch.session);
-      }
-    " 2>/dev/null || true)
-
-    if [[ -n "$SESSIONS" ]]; then
-      while IFS= read -r entry; do
-        LABEL="${entry%%:*}"
-        SESSION="${entry#*:}"
-        # Verify session exists by checking if gt nudge accepts it
-        # We use a harmless probe — just check the session is known
-        if gt nudge "$SESSION" --stdin <<< "<qa-patrol>heartbeat</qa-patrol>" 2>/dev/null; then
-          pass "Nudge delivery to ${LABEL} (${SESSION})"
-        else
-          warn "Nudge delivery to ${LABEL} (${SESSION}) failed — session may be inactive"
-        fi
-      done <<< "$SESSIONS"
-    fi
-  else
-    fail "gt command not found"
-  fi
-  echo ""
-fi
-
-# --- Report ---
-
-echo "=========================================="
-echo "[qa-patrol] Results:"
-echo "  Failures: ${#FAILURES[@]}"
-echo "  Warnings: ${#WARNINGS[@]}"
-echo "=========================================="
-
-if [[ ${#FAILURES[@]} -gt 0 ]]; then
-  echo ""
-  echo "FAILURES:"
-  for f in "${FAILURES[@]}"; do
-    echo "  - $f"
-  done
-
-  # Report to Escalations topic
-  if [[ -n "$BOT_TOKEN" ]]; then
-    FAILURE_TEXT=$(printf '%s\\n' "${FAILURES[@]}")
-    cd "$REPO_DIR"
-    bun run src/outbound-cli.ts escalation high "qa-patrol-$(date +%s)" \
-      "QA Patrol found ${#FAILURES[@]} failure(s): ${FAILURE_TEXT}" \
-      "qa-patrol" 2>/dev/null || echo "[qa-patrol] Warning: failed to report to Escalations topic"
-  fi
-
-  exit 1
-fi
-
-if [[ ${#WARNINGS[@]} -gt 0 ]]; then
-  echo ""
-  echo "WARNINGS:"
-  for w in "${WARNINGS[@]}"; do
-    echo "  - $w"
-  done
-fi
-
-echo ""
-echo "[qa-patrol] All checks passed."
-exit 0
+cd "$REPO_DIR"
+exec bun run src/run-health-checks.ts "$TIER"

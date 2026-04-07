@@ -1,51 +1,84 @@
 # QA Patrol
 
-Automated health checks for Controlle. Runs tests, verifies the gateway process
-is alive, checks Telegram API connectivity, and validates nudge delivery.
+Automated health checks for Controlle via the health-check registry.
 
 ## Quick Reference
 
 ```bash
-bin/qa-patrol                  # Standard checks (tests + process + connectivity)
-bin/qa-patrol --quick          # Process + connectivity only (fast)
+bin/qa-patrol                  # Standard checks (quick + tests + nudge)
+bin/qa-patrol --quick          # Process + config + connectivity only (fast)
 bin/qa-patrol --with-mutation  # Include Stryker mutation testing (slow)
 ```
 
-## Checks Performed
+## Health-Check Registry
 
-| # | Check | `--quick` | Default | `--with-mutation` |
-|---|---|---|---|---|
-| 1 | Test suite (`bun test`) | skip | run | run |
-| 2 | Mutation score (Stryker, threshold 50%) | skip | skip | run |
-| 3 | Controlle process alive (PID lock file) | run | run | run |
-| 4 | Telegram API reachable (bot can see supergroup) | run | run | run |
-| 5 | Nudge delivery to each configured session | skip | run | run |
+All checks are defined via `registerHealthCheck()` in `src/health-checks.ts`.
+Features register their own health contracts at implementation time.
+
+### Check Tiers
+
+| Tier | Runs in | Description |
+|------|---------|-------------|
+| quick | `--quick`, default, `--with-mutation` | Fast, no side effects |
+| standard | default, `--with-mutation` | Moderate cost (tests, nudge) |
+| slow | `--with-mutation` only | Expensive (mutation testing) |
+
+### Built-in Checks
+
+| # | Check | Tier | What 'healthy' looks like |
+|---|---|---|---|
+| 1 | `process-alive` | quick | PID lock file exists and process responds |
+| 2 | `config-valid` | quick | gateway.config.json parses with required fields |
+| 3 | `telegram-api` | quick | Bot can reach the Telegram supergroup |
+| 4 | `agent-log-config` | quick | Agent-log channels have session + project_dir |
+| 5 | `test-suite` | standard | `bun test` passes with zero failures |
+| 6 | `nudge-delivery` | standard | `gt nudge` heartbeat reaches all sessions |
+| 7 | `mutation-score` | slow | Stryker score >= 50% threshold |
+
+## Adding a Health Check
+
+When implementing a feature that produces observable output, register a health
+check so QA patrol can verify it:
+
+```typescript
+// In your feature module or in src/health-checks.ts:
+import { registerHealthCheck } from "./health-registry";
+
+registerHealthCheck({
+  name: "my-feature",
+  description: "Feature X produces at least one output per cycle",
+  tier: "quick",
+  check: async () => {
+    // Check observable state
+    if (healthy) return { status: "pass", message: "Feature X is healthy" };
+    return { status: "fail", message: "Feature X: no output in last 5 minutes" };
+  },
+});
+```
+
+### Health Check Contract
+
+Each check defines:
+- **name**: Short identifier (e.g. `process-alive`)
+- **description**: What 'healthy' looks like in human-readable form
+- **tier**: When to run (`quick`, `standard`, or `slow`)
+- **check()**: Async function returning `{ status, message }`
+
+Status values:
+- `pass` — check succeeded
+- `fail` — check failed (triggers escalation)
+- `warn` — non-critical issue (logged but no escalation)
 
 ## Failure Reporting
 
 When any check fails, qa-patrol:
-1. Prints the failure to stdout
+1. Prints all results to stdout with timing
 2. Posts a HIGH-severity escalation to the Escalations topic via `outbound-cli`
 3. Exits with code 1
 
-Warnings (non-critical issues like inactive sessions) are printed but do not
-trigger escalations or non-zero exit.
-
-## Scheduling as a Bead
-
-To run qa-patrol on a schedule (e.g., daily or after each merge):
-
-```bash
-# Create a recurring QA bead
-bd create --title "QA Patrol: Controlle health check" \
-  --description "Run bin/qa-patrol and report findings" \
-  --type task
-
-# Or trigger from a merge-queue hook (in Refinery config):
-# post-merge: cd /gt/controlle && bin/qa-patrol
-```
+Warnings are printed but do not trigger escalations or non-zero exit.
 
 ## Environment
 
-Requires `TELEGRAM_BOT_TOKEN` (or extracts it from `bin/tg-ack`).
+Requires `TELEGRAM_BOT_TOKEN` (or set in environment).
 Runs from the controlle repo root.
