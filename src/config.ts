@@ -22,6 +22,8 @@ export interface TopicChannel {
   agent_log?: boolean;
   /** Claude projects directory name (e.g. "-gt-controlle-crew-sam") for JSONL resolution */
   project_dir?: string;
+  /** Rig name for crew topics — enables auto-start when session is not running */
+  rig?: string;
 }
 
 export interface GatewayConfig {
@@ -44,6 +46,8 @@ export interface ResolvedChannel {
   label: string;
   threadId: number;
   session?: string;
+  /** Rig name for crew topics — enables auto-start */
+  rig?: string;
   /** True for escalations topic */
   isEscalations: boolean;
   /** True for mail_inbox topic */
@@ -59,6 +63,7 @@ function buildThreadIdMap(): void {
         label,
         threadId: ch.thread_id,
         session: ch.session,
+        rig: ch.rig,
         isEscalations: label === "escalations",
         isMailInbox: label === "mail_inbox",
       });

@@ -269,6 +269,82 @@ describe("handleAgentInbound (crew)", () => {
   });
 });
 
+describe("handleAgentInbound (crew auto-start)", () => {
+  beforeEach(() => {
+    execMock.mockReset();
+    execMock.mockImplementation(() => Promise.resolve("ok"));
+    retryConfig.delayMs = 0;
+  });
+
+  test("checks tmux session and starts crew when session not running", async () => {
+    // First call: tmux has-session fails (session not running)
+    // Second call: gt crew start succeeds
+    // Third call: gt nudge succeeds
+    execMock
+      .mockImplementationOnce(() => Promise.reject(new Error("no session"))) // tmux has-session
+      .mockImplementationOnce(() => Promise.resolve("ok")) // gt crew start
+      .mockImplementationOnce(() => Promise.resolve("ok")); // gt nudge
+
+    const ctx = createMockCtx();
+    await handleAgentInbound(ctx as never, "crew/sam", "co-crew-sam", "controlle");
+
+    expect(execMock).toHaveBeenCalledTimes(3);
+    // First call: tmux has-session
+    const tmuxCall = getCall(0);
+    expect(tmuxCall[0]).toBe("tmux");
+    expect(tmuxCall[1]).toEqual(["has-session", "-t", "co-crew-sam"]);
+    // Second call: gt crew start
+    const startCall = getCall(1);
+    expect(startCall[0]).toBe("gt");
+    expect(startCall[1]).toEqual(["crew", "start", "controlle", "sam", "--resume"]);
+    // Third call: gt nudge
+    const nudgeCall = getCall(2);
+    expect(nudgeCall[0]).toBe("gt");
+    expect(nudgeCall[1][0]).toBe("nudge");
+    expect(nudgeCall[1][1]).toBe("co-crew-sam");
+  });
+
+  test("skips crew start when session is already running", async () => {
+    // tmux has-session succeeds → no crew start needed
+    const ctx = createMockCtx();
+    await handleAgentInbound(ctx as never, "crew/sam", "co-crew-sam", "controlle");
+
+    expect(execMock).toHaveBeenCalledTimes(2);
+    // First call: tmux has-session (succeeds)
+    const tmuxCall = getCall(0);
+    expect(tmuxCall[0]).toBe("tmux");
+    expect(tmuxCall[1]).toEqual(["has-session", "-t", "co-crew-sam"]);
+    // Second call: gt nudge (no crew start in between)
+    const nudgeCall = getCall(1);
+    expect(nudgeCall[0]).toBe("gt");
+    expect(nudgeCall[1][0]).toBe("nudge");
+  });
+
+  test("does not check tmux when no rig configured", async () => {
+    const ctx = createMockCtx();
+    await handleAgentInbound(ctx as never, "crew/sam", "co-crew-sam");
+
+    expect(execMock).toHaveBeenCalledTimes(1);
+    // Only call: gt nudge (no tmux check)
+    const call = getCall(0);
+    expect(call[0]).toBe("gt");
+    expect(call[1][0]).toBe("nudge");
+  });
+
+  test("reports error when crew start fails", async () => {
+    execMock
+      .mockImplementationOnce(() => Promise.reject(new Error("no session"))) // tmux has-session
+      .mockImplementationOnce(() => Promise.reject(new Error("start failed"))); // gt crew start
+
+    const ctx = createMockCtx();
+    await handleAgentInbound(ctx as never, "crew/sam", "co-crew-sam", "controlle");
+
+    // Should not have attempted nudge (crew start failed, error caught by outer handler)
+    expect(execMock).toHaveBeenCalledTimes(2);
+    expect(ctx.react).not.toHaveBeenCalledWith("👍");
+  });
+});
+
 describe("handleMailInboxInbound", () => {
   beforeEach(() => {
     execMock.mockReset();

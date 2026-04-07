@@ -17,12 +17,14 @@
     "crew/sam": {
       "thread_id": 10,
       "session": "co-crew-sam",
+      "rig": "controlle",
       "agent_log": true,
       "project_dir": "-gt-controlle-crew-sam"
     },
     "crew/alan": {
       "thread_id": 211,
       "session": "mk-crew-alan",
+      "rig": "meerkat",
       "agent_log": true,
       "project_dir": "-gt-meerkat-crew-alan"
     }

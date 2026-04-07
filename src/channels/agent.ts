@@ -3,6 +3,9 @@
  *
  * Inbound:  human types message in agent topic → gt nudge <session> "text"
  * Outbound: agent-log → streamed to topic (handled by agent-log watcher)
+ *
+ * For crew topics with a `rig` configured, auto-starts the crew session
+ * if the tmux session is not running before delivering the nudge.
  */
 import type { Context } from "grammy";
 import { exec } from "../exec";
@@ -11,10 +14,47 @@ import { reportError } from "../error-handler";
 
 export const retryConfig = { attempts: 3, delayMs: 2000 };
 
+/** Check if a tmux session exists */
+async function isSessionAlive(session: string): Promise<boolean> {
+  try {
+    await exec("tmux", ["has-session", "-t", session], { timeout: 5_000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Start a crew session if not running. Returns true if session was started. */
+async function ensureCrewSession(
+  label: string,
+  session: string,
+  rig: string,
+): Promise<boolean> {
+  if (await isSessionAlive(session)) return false;
+
+  // Extract crew name from label (e.g., "crew/sam" → "sam")
+  const crewName = label.replace(/^crew\//, "");
+  console.log(
+    `[gateway] Session ${session} not running, starting crew ${crewName} in ${rig}`,
+  );
+
+  try {
+    await exec("gt", ["crew", "start", rig, crewName, "--resume"], {
+      timeout: 30_000,
+    });
+    console.log(`[gateway] Started crew session ${session}`);
+    return true;
+  } catch (err) {
+    console.error(`[gateway] Failed to start crew session ${session}:`, err);
+    throw err;
+  }
+}
+
 export async function handleAgentInbound(
   ctx: Context,
   label: string,
   session: string,
+  rig?: string,
 ): Promise<void> {
   const text = ctx.message?.text;
   if (!text) return;
@@ -55,6 +95,11 @@ export async function handleAgentInbound(
   wrapped += "</telegram>";
 
   try {
+    // Auto-start crew session if not running
+    if (rig) {
+      await ensureCrewSession(label, session, rig);
+    }
+
     await execWithRetry("gt", ["nudge", session, "--stdin"], {
       stdin: wrapped,
     });

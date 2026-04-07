@@ -91,7 +91,7 @@ export function createBot(): Bot {
       await handleMailInboxInbound(ctx);
     } else if (channel.session) {
       // Any topic with a session is an agent topic
-      await handleAgentInbound(ctx, channel.label, channel.session);
+      await handleAgentInbound(ctx, channel.label, channel.session, channel.rig);
     } else {
       console.log(
         `[gateway] Topic "${channel.label}" has no session configured, ignoring message`,
