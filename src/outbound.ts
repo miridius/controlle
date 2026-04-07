@@ -9,6 +9,7 @@ import { log } from "./log";
 import { trackEscalation } from "./channels/escalations";
 import { trackMailMessage } from "./channels/mail-inbox";
 import { supergroupChatId } from "./config";
+import { gfmToTelegramHtml } from "./markdown";
 
 let botApi: Api | null = null;
 
@@ -153,19 +154,19 @@ export function escapeMarkdownV2(s: string): string {
 }
 
 /**
- * Send a message with MarkdownV2 formatting, falling back to plain text
- * if Telegram rejects it (400 error from malformed markdown).
+ * Send a message with HTML formatting (converted from GFM), falling back
+ * to plain text if Telegram rejects it (400 error).
  */
 export async function sendWithMarkdownFallback(
   threadId: number,
   text: string,
   opts: SendOptions = { channel: "unknown" },
 ): Promise<number> {
-  const escaped = escapeMarkdownV2(text);
+  const html = gfmToTelegramHtml(text);
   try {
-    const result = await send(threadId, escaped, {
+    const result = await send(threadId, html, {
       ...opts,
-      parseMode: "MarkdownV2",
+      parseMode: "HTML",
     });
     const entitySummary = formatEntitySummary(result.entities);
     console.log(
@@ -175,7 +176,7 @@ export async function sendWithMarkdownFallback(
   } catch (err) {
     if (err instanceof GrammyError && err.error_code === 400) {
       console.log(
-        `[agent-log] MarkdownV2 rejected for ${opts.channel}, falling back to plain text`,
+        `[agent-log] HTML rejected for ${opts.channel}, falling back to plain text`,
       );
       const result = await send(threadId, text, { ...opts, parseMode: undefined });
       const entitySummary = formatEntitySummary(result.entities);

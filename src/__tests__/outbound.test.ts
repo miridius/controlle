@@ -264,14 +264,14 @@ describe("send result", () => {
 });
 
 describe("sendWithMarkdownFallback", () => {
-  test("sends with MarkdownV2 when it succeeds", async () => {
+  test("sends GFM converted to HTML", async () => {
     const { api, sentMessages } = createMockApi();
     setApi(api as never);
 
-    await sendWithMarkdownFallback(42, "hello_world", { channel: "test" });
+    await sendWithMarkdownFallback(42, "hello **bold** world", { channel: "test" });
     expect(sentMessages).toHaveLength(1);
-    expect(sentMessages[0].text).toBe("hello\\_world");
-    expect(sentMessages[0].opts.parse_mode).toBe("MarkdownV2");
+    expect(sentMessages[0].text).toBe("hello <b>bold</b> world");
+    expect(sentMessages[0].opts.parse_mode).toBe("HTML");
   });
 
   test("falls back to plain text on 400 error", async () => {
@@ -290,8 +290,7 @@ describe("sendWithMarkdownFallback", () => {
           opts: Record<string, unknown>,
         ) => {
           callCount++;
-          if (callCount === 1 && opts.parse_mode === "MarkdownV2") {
-            // Import GrammyError to throw a proper error
+          if (callCount === 1 && opts.parse_mode === "HTML") {
             const { GrammyError } = await import("grammy");
             throw new GrammyError(
               "Bad Request: can't parse entities",
@@ -311,9 +310,9 @@ describe("sendWithMarkdownFallback", () => {
       channel: "test",
     });
     expect(msgId).toBe(100);
-    // Should have tried MarkdownV2 first (failed), then plain text
+    // Should have tried HTML first (failed), then plain text
     expect(sentMessages).toHaveLength(1);
-    expect(sentMessages[0].text).toBe("bad *markdown"); // original unescaped text
+    expect(sentMessages[0].text).toBe("bad *markdown"); // original text
     expect(sentMessages[0].opts.parse_mode).toBeUndefined();
   });
 
@@ -375,7 +374,7 @@ describe("sendWithMarkdownFallback", () => {
     expect(logs.some((l) => l.includes("msg_id=100"))).toBe(true);
   });
 
-  test("logs fallback event when MarkdownV2 is rejected", async () => {
+  test("logs fallback event when HTML is rejected", async () => {
     let callCount = 0;
     const api = {
       sendMessage: mock(
@@ -385,7 +384,7 @@ describe("sendWithMarkdownFallback", () => {
           opts: Record<string, unknown>,
         ) => {
           callCount++;
-          if (callCount === 1 && opts.parse_mode === "MarkdownV2") {
+          if (callCount === 1 && opts.parse_mode === "HTML") {
             const { GrammyError } = await import("grammy");
             throw new GrammyError(
               "Bad Request: can't parse entities",
@@ -412,7 +411,7 @@ describe("sendWithMarkdownFallback", () => {
       console.log = origLog;
     }
 
-    expect(logs.some((l) => l.includes("MarkdownV2 rejected for crew/sam"))).toBe(true);
+    expect(logs.some((l) => l.includes("HTML rejected for crew/sam"))).toBe(true);
     expect(logs.some((l) => l.includes("falling back to plain text"))).toBe(true);
     expect(logs.some((l) => l.includes("(plain text): 200 OK"))).toBe(true);
   });
