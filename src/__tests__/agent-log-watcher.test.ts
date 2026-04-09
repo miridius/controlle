@@ -1,8 +1,8 @@
 /**
- * Tests for agent-log-watcher.ts: extractAssistantText, truncate, lifecycle.
+ * Tests for agent-log-watcher.ts: extractAssistantText, lifecycle.
  */
 import { describe, expect, test, afterEach } from "bun:test";
-import { extractAssistantText, truncate, startAgentLogWatcher, stopAgentLogWatcher } from "../agent-log-watcher";
+import { extractAssistantText, startAgentLogWatcher, stopAgentLogWatcher } from "../agent-log-watcher";
 
 describe("extractAssistantText", () => {
   test("extracts text from assistant message event", () => {
@@ -84,36 +84,6 @@ describe("extractAssistantText", () => {
   });
 });
 
-describe("truncate", () => {
-  test("returns short text unchanged", () => {
-    expect(truncate("hello")).toBe("hello");
-  });
-
-  test("returns text at exactly max length unchanged", () => {
-    const text = "x".repeat(4000);
-    expect(truncate(text)).toBe(text);
-  });
-
-  test("truncates text exceeding max length", () => {
-    const text = "x".repeat(5000);
-    const result = truncate(text);
-    expect(result.length).toBeLessThanOrEqual(4000);
-    expect(result).toEndWith("[...truncated]");
-  });
-
-  test("respects custom max length", () => {
-    const text = "x".repeat(200);
-    const result = truncate(text, 100);
-    expect(result.length).toBeLessThanOrEqual(100);
-    expect(result).toEndWith("[...truncated]");
-  });
-
-  test("preserves content before truncation point", () => {
-    const text = "important data " + "x".repeat(5000);
-    const result = truncate(text, 100);
-    expect(result).toStartWith("important data ");
-  });
-});
 
 describe("stopAgentLogWatcher", () => {
   afterEach(() => {

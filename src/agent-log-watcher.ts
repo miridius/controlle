@@ -14,8 +14,6 @@ import { agentLogChannels } from "./config";
 import { reportError } from "./error-handler";
 
 const POLL_INTERVAL_MS = 2000;
-const MAX_MESSAGE_LENGTH = 4000; // Telegram limit ~4096
-
 interface WatchState {
   filePath: string;
   offset: number;
@@ -108,12 +106,6 @@ export function extractAssistantText(line: string): string | null {
   return null;
 }
 
-/** Truncate text for Telegram */
-export function truncate(text: string, max: number = MAX_MESSAGE_LENGTH): string {
-  if (text.length <= max) return text;
-  return text.slice(0, max - 20) + "\n\n[...truncated]";
-}
-
 /** Poll loop for a single channel */
 async function pollChannel(channel: {
   threadId: number;
@@ -140,7 +132,7 @@ async function pollChannel(channel: {
     const text = extractAssistantText(line);
     if (text) {
       try {
-        await sendWithMarkdownFallback(channel.threadId, truncate(text), {
+        await sendWithMarkdownFallback(channel.threadId, text, {
           channel: channel.label,
           disablePreview: true,
         });

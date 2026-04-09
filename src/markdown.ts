@@ -36,6 +36,53 @@ function convertInline(text: string): string {
 }
 
 /**
+ * Truncate an HTML string without breaking tags.
+ *
+ * 1. If inside a tag at the cut point, backs up to before it.
+ * 2. Closes any unclosed tags in reverse order.
+ * 3. Appends a truncation marker.
+ */
+export function truncateHtml(
+  html: string,
+  max: number = 4000,
+): string {
+  if (html.length <= max) return html;
+
+  const suffix = "\n\n[...truncated]";
+  let cutPoint = max - suffix.length;
+
+  // Don't cut inside an HTML tag — back up to before the '<'
+  const lastOpen = html.lastIndexOf("<", cutPoint);
+  const lastClose = html.lastIndexOf(">", cutPoint);
+  if (lastOpen > lastClose) {
+    cutPoint = lastOpen;
+  }
+
+  const truncated = html.slice(0, cutPoint);
+
+  // Track open tags to close them
+  const openTags: string[] = [];
+  const tagRe = /<\/?(\w+)[^>]*>/g;
+  let m;
+  while ((m = tagRe.exec(truncated)) !== null) {
+    const [full, tag] = m;
+    if (full[1] === "/") {
+      // closing tag — pop the most recent matching open
+      const idx = openTags.lastIndexOf(tag);
+      if (idx !== -1) openTags.splice(idx, 1);
+    } else {
+      openTags.push(tag);
+    }
+  }
+
+  const closers = openTags
+    .reverse()
+    .map((t) => `</${t}>`)
+    .join("");
+  return truncated + closers + suffix;
+}
+
+/**
  * Convert a GFM markdown string to Telegram-compatible HTML.
  *
  * Code blocks are extracted first (preserving language hints as-is),

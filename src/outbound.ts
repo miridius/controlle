@@ -9,7 +9,7 @@ import { log } from "./log";
 import { trackEscalation } from "./channels/escalations";
 import { trackMailMessage } from "./channels/mail-inbox";
 import { supergroupChatId } from "./config";
-import { gfmToTelegramHtml } from "./markdown";
+import { gfmToTelegramHtml, truncateHtml } from "./markdown";
 import { escapeHtml, severityIcon } from "./utils";
 
 let botApi: Api | null = null;
@@ -149,7 +149,7 @@ export async function sendWithMarkdownFallback(
   text: string,
   opts: SendOptions = { channel: "unknown" },
 ): Promise<number> {
-  const html = gfmToTelegramHtml(text);
+  const html = truncateHtml(gfmToTelegramHtml(text));
   try {
     const result = await send(threadId, html, {
       ...opts,
