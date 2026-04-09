@@ -1,0 +1,13 @@
+[extend]
+useDefault = true
+
+[[rules]]
+id = "telegram-bot-token"
+description = "Telegram Bot Token"
+regex = '''\d{8,10}:[A-Za-z0-9_-]{34,}'''
+
+[allowlist]
+paths = [
+  '''__tests__/''',
+  '''\.env\.example$''',
+]
