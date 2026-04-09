@@ -25,10 +25,16 @@ start_controlle() {
   # Clean stale runtime files from previous container
   rm -f "$PIDFILE" "$LOCKFILE"
   cd "$WORKDIR"
-  # Unset TMUX vars — the bot is a background daemon, not a tmux pane.
-  # If inherited, gt nudge uses the source pane to resolve targets, which
-  # breaks cross-session delivery (e.g. crew/sam pane → mayor session).
-  unset TMUX TMUX_PANE
+
+  # After Docker restart, GT_PANE_ID in tmux session envs may contain stale
+  # pane IDs (%N). gt constructs "session:%N" targets which tmux rejects.
+  # Fix by resetting all GT_PANE_ID values to window index 0.
+  for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do
+    local old
+    old=$(tmux show-environment -t "$s" GT_PANE_ID 2>/dev/null | cut -d= -f2)
+    [[ "$old" == %* ]] && tmux set-environment -t "$s" GT_PANE_ID 0
+  done
+
   nohup bun run --watch src/index.ts > "${RUNTIME}/controlle.log" 2>&1 &
   echo $! > "$PIDFILE"
 }
