@@ -107,13 +107,16 @@ describe("handleAgentInbound (mayor)", () => {
     expect(stdin).not.toContain("reply_to=");
   });
 
-  test("reacts with thumbs up on success", async () => {
+  test("reacts with pending then thumbs up on success", async () => {
     const ctx = createMockCtx();
     await handleAgentInbound(ctx as never, "mayor", "gt-mayor");
-    expect(ctx.react).toHaveBeenCalledWith("👍");
+    expect(ctx.react).toHaveBeenCalledTimes(2);
+    const reactCalls = ctx.react.mock.calls as unknown as [string][];
+    expect(reactCalls[0][0]).toBe("👀");
+    expect(reactCalls[1][0]).toBe("👍");
   });
 
-  test("silently handles error after all retries exhausted (no user-visible reply)", async () => {
+  test("reacts with pending then failure after all retries exhausted", async () => {
     execMock.mockImplementation(() =>
       Promise.reject(new Error("nudge failed")),
     );
@@ -121,8 +124,15 @@ describe("handleAgentInbound (mayor)", () => {
     await handleAgentInbound(ctx as never, "mayor", "gt-mayor");
     // Should have retried 3 times
     expect(execMock).toHaveBeenCalledTimes(3);
-    // Should NOT reply with error in Telegram (agent-first error routing)
-    expect(ctx.reply).not.toHaveBeenCalled();
+    // Should react pending then failure
+    expect(ctx.react).toHaveBeenCalledTimes(2);
+    const reactCalls = ctx.react.mock.calls as unknown as [string][];
+    expect(reactCalls[0][0]).toBe("👀");
+    expect(reactCalls[1][0]).toBe("😢");
+    // Should reply with error message
+    expect(ctx.reply).toHaveBeenCalled();
+    const replyCall = ctx.reply.mock.calls[0] as unknown as [string, Record<string, unknown>];
+    expect(replyCall[0]).toContain("delivery failed");
   });
 
   test("retries on transient failure then succeeds", async () => {
@@ -237,21 +247,27 @@ describe("handleAgentInbound (crew)", () => {
     expect(stdin).toContain("<ack-cmd>bin/tg-ack 1</ack-cmd>");
   });
 
-  test("reacts with thumbs up on success", async () => {
+  test("reacts with pending then thumbs up on success", async () => {
     const ctx = createMockCtx();
     await handleAgentInbound(ctx as never, "crew/sam", "co-crew-sam");
-    expect(ctx.react).toHaveBeenCalledWith("👍");
+    expect(ctx.react).toHaveBeenCalledTimes(2);
+    const reactCalls = ctx.react.mock.calls as unknown as [string][];
+    expect(reactCalls[0][0]).toBe("👀");
+    expect(reactCalls[1][0]).toBe("👍");
   });
 
-  test("silently handles error after retries exhausted (no user-visible reply)", async () => {
+  test("reacts with failure and posts error after retries exhausted", async () => {
     execMock.mockImplementation(() =>
       Promise.reject(new Error("failed")),
     );
     const ctx = createMockCtx();
     await handleAgentInbound(ctx as never, "crew/sam", "co-crew-sam");
     expect(execMock).toHaveBeenCalledTimes(3);
-    // Should NOT reply with error in Telegram (agent-first error routing)
-    expect(ctx.reply).not.toHaveBeenCalled();
+    // Should react with failure and post error message
+    expect(ctx.react).toHaveBeenCalledWith("😢");
+    expect(ctx.reply).toHaveBeenCalled();
+    const replyCall = ctx.reply.mock.calls[0] as unknown as [string, Record<string, unknown>];
+    expect(replyCall[0]).toContain("delivery failed");
   });
 
   test("returns early if no text", async () => {

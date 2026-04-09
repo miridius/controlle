@@ -250,3 +250,15 @@ All inbound and outbound messages are logged to daily log files:
 - `session` (optional): GT session ID for nudge delivery
 - `agent_log` (optional): enable JSONL transcript streaming
 - `project_dir` (optional): Claude projects subdirectory for JSONL resolution
+
+## REQ-19: Inbound Message Delivery Feedback
+
+**All inbound messages MUST receive visual feedback indicating delivery status (success, pending, or failure).**
+
+When a human sends a message in an agent's forum topic:
+
+1. **Immediately** react with 👀 (eyes) to acknowledge receipt
+2. **On successful delivery**: replace reaction with 👍 (success)
+3. **On failed delivery** (after retry exhaustion): replace reaction with 😢 (failure) and post a brief error message as a reply to the original message
+
+This ensures the human operator always knows the delivery status of their message. Silent failures — where the bot appears to ignore a message — are not acceptable.

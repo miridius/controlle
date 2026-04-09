@@ -94,6 +94,9 @@ export async function handleAgentInbound(
   wrapped += `<ack-cmd>bin/tg-ack ${msgId}</ack-cmd>`;
   wrapped += "</telegram>";
 
+  // REQ-19: Immediate visual feedback on receipt
+  await ctx.react("👀");
+
   try {
     // Auto-start crew session if not running
     if (rig) {
@@ -105,10 +108,11 @@ export async function handleAgentInbound(
     });
     await ctx.react("👍");
   } catch (err) {
-    // Silent failure: log via error handler (medium severity, console only).
-    // If failures repeat (3x in 60s), auto-escalates to "high" which nudges
-    // the responsible agent first, then falls back to Escalations topic.
-    // Dave should NOT see individual nudge delivery failures.
+    // REQ-19: Replace pending reaction with failure indicator
+    await ctx.react("😢");
+    await ctx.reply("⚠️ Message delivery failed. The agent may be unreachable.", {
+      reply_parameters: { message_id: msgId! },
+    });
     reportError(label, err);
   }
 }
