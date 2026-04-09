@@ -154,6 +154,7 @@ mkdir -p "\${RUNTIME}"
 # Start Controlle if not already running
 start_controlle() {
   cd "${REPO_DIR}"
+  unset TMUX TMUX_PANE
   TELEGRAM_BOT_TOKEN="${BOT_TOKEN}" \\
     nohup bun run --watch src/index.ts > "\${RUNTIME}/controlle.log" 2>&1 &
   echo \$! > "\$PIDFILE"
