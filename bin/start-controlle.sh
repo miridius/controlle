@@ -9,20 +9,28 @@ mkdir -p "${RUNTIME}"
 # Source .env for credentials
 [[ -f "$WORKDIR/.env" ]] && set -a && source "$WORKDIR/.env" && set +a
 
-# Start Controlle if not already running
+LOCKFILE="${RUNTIME}/controlle.lock"
+
+# Check if bot is actually running (handles stale PIDs after container restart)
+is_running() {
+  local pf="$1"
+  [[ -f "$pf" ]] || return 1
+  local pid
+  pid=$(cat "$pf" 2>/dev/null) || return 1
+  [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null && return 0
+  return 1
+}
+
 start_controlle() {
+  # Clean stale runtime files from previous container
+  rm -f "$PIDFILE" "$LOCKFILE"
   cd "$WORKDIR"
   nohup bun run --watch src/index.ts > "${RUNTIME}/controlle.log" 2>&1 &
   echo $! > "$PIDFILE"
 }
 
-if [[ -f "$PIDFILE" ]]; then
-  pid=$(cat "$PIDFILE")
-  if kill -0 "$pid" 2>/dev/null; then
-    :
-  else
-    start_controlle
-  fi
+if is_running "$PIDFILE" || is_running "$LOCKFILE"; then
+  :
 else
   start_controlle
 fi

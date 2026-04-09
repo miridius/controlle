@@ -27,14 +27,16 @@ topics in a single supergroup. Three channel types:
 
 ## Deployment
 
-Controlle is designed to be checked out as a Gas Town rig. Agents (typically
-the mayor) can then modify config, add crew members, and maintain it in place.
+Controlle is designed to be forked and checked out as a Gas Town rig. Fork
+first so your agents can push config changes, crew additions, and fixes back
+to your own repo.
 
 ```bash
 cd /gt  # or wherever your Gas Town root is
-git clone https://github.com/miridius/controlle.git
+git clone https://github.com/<you>/controlle.git
 cd controlle
 cp .env.example .env
+cp gateway.config.example.json gateway.config.json
 bun install
 ```
 
@@ -72,9 +74,10 @@ curl -s -X POST "https://api.telegram.org/bot${TOKEN}/createForumTopic" \
   | jq '.result.message_thread_id'
 ```
 
-### 4. Write `gateway.config.json`
+### 4. Configure `gateway.config.json`
 
-Map the thread IDs from step 3 to your GT sessions:
+Edit the config (copied from `gateway.config.example.json` in step 1) with
+the thread IDs from step 3 and your GT sessions:
 
 ```jsonc
 {
