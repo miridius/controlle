@@ -3,11 +3,11 @@
 Telegram gateway bridging human operators with Gas Town agents via forum
 topics in a single supergroup. Three channel types:
 
-| Channel type | Topics | Direction | Mechanism |
-|--------------|--------|-----------|-----------|
-| Agent | Mayor, crew members | In: human → `gt nudge` session | Out: agent-log → topic |
-| Escalations | 1 shared topic | In: emoji reactions → `gt escalate ack/close` | Out: escalation alerts |
-| Mail Inbox | 1 shared topic | In: reply-to → `gt mail reply` | Out: `--human` mail forwarded |
+| Channel type | Topics | Inbound (human → GT) | Outbound (GT → human) |
+|--------------|--------|----------------------|------------------------|
+| Agent | Mayor, crew members | Message → `gt nudge` session | Agent-log JSONL → topic |
+| Escalations | 1 shared topic | Reactions → `gt escalate ack/close` | Severity-tagged alerts |
+| Mail Inbox | 1 shared topic | Reply-to → `gt mail reply` | `--human` mail forwarded |
 
 ## Prerequisites
 
