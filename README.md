@@ -16,20 +16,21 @@ topics in a single supergroup. Three channel types:
 - A Telegram bot token (from BotFather — the human sets this up)
 - A Telegram supergroup with **Topics enabled**, bot added as admin
 
-## Setup
+## Deployment
 
-The human creates the bot and supergroup beforehand. An agent (typically the
-mayor) handles the rest.
-
-### 1. Install and configure credentials
+Controlle is designed to be checked out as a Gas Town rig. Agents (typically
+the mayor) can then modify config, add crew members, and maintain it in place.
 
 ```bash
-cd /path/to/controlle
+cd /gt  # or wherever your Gas Town root is
+git clone https://github.com/miridius/controlle.git
+cd controlle
 cp .env.example .env
 bun install
 ```
 
-Set `TELEGRAM_BOT_TOKEN` in `.env`.
+Set `TELEGRAM_BOT_TOKEN` in `.env`. The human creates the bot and supergroup
+beforehand; an agent handles the rest.
 
 ### 2. Discover your supergroup
 
