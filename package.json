@@ -12,7 +12,8 @@
     "test": "bun test",
     "test:coverage": "bun test --coverage",
     "test:mutation": "stryker run",
-    "test:gate": "bun run typecheck && bun test"
+    "test:gate": "bun run typecheck && bun test",
+    "code-patrol": "bin/code-patrol"
   },
   "dependencies": {
     "grammy": "^1.35.0"

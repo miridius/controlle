@@ -1,0 +1,468 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# code-patrol: Detect duplication, dead exports, and code smells in the controlle codebase.
+#
+# Checks:
+#   1. Code duplication (via jscpd)
+#   2. Dead exports (exported symbols with zero production importers)
+#   3. Inconsistent naming (error sources, log prefixes)
+#   4. Unbounded collections (Map/Set/array without cleanup)
+#
+# Usage:
+#   bin/code-patrol                  # Human-readable report
+#   bin/code-patrol --json           # Machine-readable JSON output
+#   bin/code-patrol --create-beads   # Auto-create beads for findings
+#
+# Exit code: 0 = no issues, 1 = issues found.
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_DIR="$(dirname "$SCRIPT_DIR")"
+SRC_DIR="${REPO_DIR}/src"
+
+JSON_OUTPUT=false
+CREATE_BEADS=false
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --json)          JSON_OUTPUT=true; shift ;;
+    --create-beads)  CREATE_BEADS=true; shift ;;
+    -h|--help)
+      sed -n '2,/^$/s/^# //p' "$0"
+      exit 0
+      ;;
+    *) echo "Unknown option: $1" >&2; exit 1 ;;
+  esac
+done
+
+# --- Helpers ---
+
+FINDINGS=()
+FINDING_COUNT=0
+
+finding() {
+  local check="$1" severity="$2" message="$3" detail="${4:-}"
+  FINDING_COUNT=$((FINDING_COUNT + 1))
+  FINDINGS+=("${check}|${severity}|${message}|${detail}")
+  if [[ "$JSON_OUTPUT" != true ]]; then
+    local icon="WARN"
+    [[ "$severity" == "error" ]] && icon="FAIL"
+    echo "  ${icon}: [${check}] ${message}"
+    [[ -n "$detail" ]] && echo "        ${detail}"
+  fi
+}
+
+pass() {
+  if [[ "$JSON_OUTPUT" != true ]]; then
+    echo "  PASS: $1"
+  fi
+}
+
+# --- Check 1: Code Duplication (jscpd) ---
+
+check_duplication() {
+  if [[ "$JSON_OUTPUT" != true ]]; then
+    echo "[code-patrol] Checking for code duplication..."
+  fi
+
+  local jscpd_out
+  jscpd_out=$(mktemp)
+  local jscpd_json
+  jscpd_json=$(mktemp -d)
+
+  # Run jscpd with conservative thresholds: min 5 lines, min 30 tokens
+  if npx jscpd "${SRC_DIR}" \
+    --min-lines 5 \
+    --min-tokens 30 \
+    --reporters json \
+    --output "${jscpd_json}" \
+    --ignore "**/node_modules/**,**/__tests__/**" \
+    --format "typescript" \
+    > "$jscpd_out" 2>&1; then
+    :
+  fi
+
+  local report="${jscpd_json}/jscpd-report.json"
+  if [[ -f "$report" ]]; then
+    local dup_count
+    dup_count=$(bun -e "
+      const r = JSON.parse(require('fs').readFileSync('${report}', 'utf-8'));
+      const dups = r.duplicates || [];
+      console.log(dups.length);
+    " 2>/dev/null || echo "0")
+
+    if [[ "$dup_count" -gt 0 ]]; then
+      # Extract details for each duplicate
+      bun -e "
+        const r = JSON.parse(require('fs').readFileSync('${report}', 'utf-8'));
+        for (const d of r.duplicates || []) {
+          const f1 = d.firstFile?.name || 'unknown';
+          const f2 = d.secondFile?.name || 'unknown';
+          const lines = d.lines || 0;
+          const s1 = d.firstFile?.startLoc?.line || '?';
+          const e1 = d.firstFile?.endLoc?.line || '?';
+          const s2 = d.secondFile?.startLoc?.line || '?';
+          const e2 = d.secondFile?.endLoc?.line || '?';
+          console.log(f1 + ':' + s1 + '-' + e1 + ' <-> ' + f2 + ':' + s2 + '-' + e2 + ' (' + lines + ' lines)');
+        }
+      " 2>/dev/null | while IFS= read -r line; do
+        finding "duplication" "warn" "Duplicated code block" "$line"
+      done
+    else
+      pass "No code duplication detected"
+    fi
+  else
+    finding "duplication" "warn" "jscpd report not generated" "Check jscpd installation"
+  fi
+
+  rm -rf "$jscpd_out" "$jscpd_json"
+  if [[ "$JSON_OUTPUT" != true ]]; then echo ""; fi
+}
+
+# --- Check 2: Dead Exports ---
+
+check_dead_exports() {
+  if [[ "$JSON_OUTPUT" != true ]]; then
+    echo "[code-patrol] Checking for dead exports..."
+  fi
+
+  local found_dead=false
+
+  # Use bun to parse exports and imports efficiently in a single pass
+  local results
+  results=$(bun -e "
+    const fs = require('fs');
+    const path = require('path');
+    const srcDir = '${SRC_DIR}';
+
+    // Entry points (executed, not imported)
+    const ENTRY_POINTS = new Set(['index.ts', 'outbound-cli.ts']);
+
+    // Collect all .ts files
+    function walk(dir) {
+      const files = [];
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory() && entry.name !== 'node_modules') {
+          files.push(...walk(full));
+        } else if (entry.name.endsWith('.ts')) {
+          files.push(full);
+        }
+      }
+      return files;
+    }
+
+    const allFiles = walk(srcDir);
+    const srcFiles = allFiles.filter(f => !f.includes('__tests__'));
+    const testFiles = allFiles.filter(f => f.includes('__tests__'));
+
+    // Extract exports from non-entry, non-test files
+    const exportMap = new Map(); // symbol -> relative file path
+    for (const file of srcFiles) {
+      const basename = path.basename(file);
+      if (ENTRY_POINTS.has(basename)) continue;
+
+      const content = fs.readFileSync(file, 'utf-8');
+      const rel = path.relative(srcDir, file);
+
+      // Match: export function X, export const X, export interface X, etc.
+      const declRe = /export\s+(?:function|const|let|var|interface|type|class|enum)\s+(\w+)/g;
+      let m;
+      while ((m = declRe.exec(content)) !== null) {
+        exportMap.set(m[1] + '@' + rel, { sym: m[1], file: rel, basename });
+      }
+
+      // Match: export { X, Y }
+      const reExportRe = /export\s*\{([^}]+)\}/g;
+      while ((m = reExportRe.exec(content)) !== null) {
+        for (const name of m[1].split(',').map(s => s.trim().split(/\s+as\s+/)[0].trim())) {
+          if (name) exportMap.set(name + '@' + rel, { sym: name, file: rel, basename });
+        }
+      }
+    }
+
+    // Build import index: file -> set of imported symbol names
+    const fileImports = new Map();
+    for (const file of [...srcFiles, ...testFiles]) {
+      const content = fs.readFileSync(file, 'utf-8');
+      const symbols = new Set();
+      const importRe = /import\s*(?:type\s*)?\{([^}]+)\}\s*from/g;
+      let m;
+      while ((m = importRe.exec(content)) !== null) {
+        for (const name of m[1].split(',').map(s => s.trim().split(/\s+as\s+/)[0].trim())) {
+          if (name) symbols.add(name);
+        }
+      }
+      fileImports.set(file, symbols);
+    }
+
+    // For each export, check if it's imported in production code (excluding its own file)
+    for (const [key, { sym, file, basename }] of exportMap) {
+      const prodImporters = srcFiles.filter(f => {
+        if (path.basename(f) === basename) return false;
+        return fileImports.get(f)?.has(sym);
+      });
+
+      if (prodImporters.length === 0) {
+        // Check test imports
+        const testImporters = testFiles.filter(f => {
+          return fileImports.get(f)?.has(sym);
+        });
+
+        if (testImporters.length > 0) {
+          console.log('test-only|' + sym + '|' + file + '|' + testImporters.length);
+        } else {
+          console.log('dead|' + sym + '|' + file + '|0');
+        }
+      }
+    }
+  " 2>/dev/null || true)
+
+  while IFS='|' read -r kind sym file count; do
+    [[ -z "$kind" ]] && continue
+    found_dead=true
+    if [[ "$kind" == "test-only" ]]; then
+      finding "dead-export" "warn" "Test-only export: ${sym}" "${file} (imported by ${count} test file(s) only)"
+    else
+      finding "dead-export" "error" "Dead export: ${sym}" "${file} (zero importers)"
+    fi
+  done <<< "$results"
+
+  if [[ "$found_dead" != true ]]; then
+    pass "No dead exports detected"
+  fi
+
+  if [[ "$JSON_OUTPUT" != true ]]; then echo ""; fi
+}
+
+# --- Check 3: Inconsistent Naming ---
+
+check_naming() {
+  if [[ "$JSON_OUTPUT" != true ]]; then
+    echo "[code-patrol] Checking for inconsistent naming..."
+  fi
+
+  local found_issues=false
+
+  # Check reportError source strings — should match the module's logical name
+  # Process-level error sources (used in signal/exception handlers) are exempt
+  local -a EXEMPT_SOURCES=("uncaught-exception" "unhandled-rejection" "bot" "bot-error")
+
+  while IFS= read -r src_file; do
+    local basename
+    basename=$(basename "$src_file" .ts)
+
+    [[ "$src_file" == *"__tests__"* ]] && continue
+
+    # Find reportError calls and extract the source string
+    local sources
+    sources=$(grep -oP 'reportError\(\s*["\x27]([^"\x27]+)' "$src_file" 2>/dev/null | grep -oP '["\x27]\K[^"\x27]+' || true)
+
+    while IFS= read -r source; do
+      [[ -z "$source" ]] && continue
+
+      # Skip exempt process-level sources
+      local is_exempt=false
+      for ex in "${EXEMPT_SOURCES[@]}"; do
+        [[ "$source" == "$ex" ]] && is_exempt=true
+      done
+      [[ "$is_exempt" == true ]] && continue
+
+      # Source should be related to the file name (case-insensitive contains)
+      local lower_source lower_basename
+      lower_source=$(echo "$source" | tr '[:upper:]' '[:lower:]' | tr '-' '_')
+      lower_basename=$(echo "$basename" | tr '[:upper:]' '[:lower:]' | tr '-' '_')
+
+      if [[ "$lower_source" != *"$lower_basename"* && "$lower_basename" != *"$lower_source"* ]]; then
+        found_issues=true
+        finding "naming" "warn" "Error source '${source}' doesn't match file '${basename}.ts'" "${src_file#${SRC_DIR}/}"
+      fi
+    done <<< "$sources"
+  done < <(find "$SRC_DIR" -name '*.ts' -not -path '*/__tests__/*')
+
+  # Check log() call channel arguments for consistency (exclude test files)
+  # Match only imported log() calls: log("channel", ...) — not console.log, Math.log, etc.
+  # The log() function from log.ts takes (channel, direction, from, text) — 4 args
+  local log_channels
+  log_channels=$(grep -rhoP '(?<![.\w])log\(\s*["\x27]([^"\x27]+)["\x27]\s*,' "$SRC_DIR" --include='*.ts' \
+    --exclude-dir='__tests__' 2>/dev/null \
+    | grep -oP '["\x27]\K[^"\x27]+' \
+    | sort | uniq -c | sort -rn || true)
+
+  # Flag channels that appear only once (might be a typo vs similar channels)
+  local channel_count
+  channel_count=$(echo "$log_channels" | grep -cv '^\s*$' 2>/dev/null || echo "0")
+  channel_count=$(echo "$channel_count" | tr -d '[:space:]')
+  channel_count="${channel_count:-0}"
+  if [[ "$channel_count" -gt 3 ]]; then
+    local singletons
+    singletons=$(echo "$log_channels" | awk '$1 == 1 { print $2 }' || true)
+    while IFS= read -r ch; do
+      [[ -z "$ch" ]] && continue
+      found_issues=true
+      finding "naming" "warn" "Log channel '${ch}' used only once (possible typo)" ""
+    done <<< "$singletons"
+  fi
+
+  if [[ "$found_issues" != true ]]; then
+    pass "No naming inconsistencies detected"
+  fi
+
+  if [[ "$JSON_OUTPUT" != true ]]; then echo ""; fi
+}
+
+# --- Check 4: Unbounded Collections ---
+
+check_unbounded() {
+  if [[ "$JSON_OUTPUT" != true ]]; then
+    echo "[code-patrol] Checking for unbounded collections..."
+  fi
+
+  local found_issues=false
+
+  # Use bun for more precise analysis
+  local results
+  results=$(bun -e "
+    const fs = require('fs');
+    const path = require('path');
+    const srcDir = '${SRC_DIR}';
+
+    function walk(dir) {
+      const files = [];
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory() && entry.name !== 'node_modules' && entry.name !== '__tests__') {
+          files.push(...walk(full));
+        } else if (entry.name.endsWith('.ts')) {
+          files.push(full);
+        }
+      }
+      return files;
+    }
+
+    for (const file of walk(srcDir)) {
+      const content = fs.readFileSync(file, 'utf-8');
+      const rel = path.relative(srcDir, file);
+      const lines = content.split('\n');
+
+      // Find module-level Map/Set declarations (not inside functions)
+      // Simple heuristic: declarations at indent level 0 (no leading whitespace)
+      // or const at top level
+      let braceDepth = 0;
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        // Track brace depth (rough — doesn't handle strings/comments perfectly)
+        for (const ch of line) {
+          if (ch === '{') braceDepth++;
+          if (ch === '}') braceDepth--;
+        }
+
+        // Only check module-level declarations (braceDepth 0 or 1 for top-level objects)
+        if (braceDepth > 1) continue;
+
+        const mapSetMatch = line.match(/(?:const|let)\s+(\w+)\s*[=:][^;]*new\s+(Map|Set)/);
+        if (!mapSetMatch) continue;
+
+        const [, varName, collType] = mapSetMatch;
+
+        // Skip static sets initialized with literal values (e.g., new Set(['a', 'b']))
+        if (collType === 'Set' && line.match(/new\s+Set\s*(<[^>]+>)?\s*\(\s*\[/)) continue;
+
+        // Check if file has cleanup patterns for this collection
+        const hasDelete = content.includes(varName + '.delete(');
+        const hasClear = content.includes(varName + '.clear(');
+        const hasSize = content.match(new RegExp(varName + '\\.size\\s*[><=]'));
+
+        if (!hasDelete && !hasClear && !hasSize) {
+          // Check if it's only used with .set/.get (growing) or also .add (for Sets)
+          const hasGrowth = content.includes(varName + '.set(') || content.includes(varName + '.add(');
+          if (hasGrowth) {
+            console.log('unbounded-' + collType.toLowerCase() + '|' + varName + '|' + rel);
+          }
+        }
+      }
+    }
+  " 2>/dev/null || true)
+
+  while IFS='|' read -r kind varName file; do
+    [[ -z "$kind" ]] && continue
+    found_issues=true
+    finding "unbounded" "warn" "Unbounded ${kind#unbounded-} '${varName}' without cleanup" "${file}"
+  done <<< "$results"
+
+  if [[ "$found_issues" != true ]]; then
+    pass "No unbounded collections detected"
+  fi
+
+  if [[ "$JSON_OUTPUT" != true ]]; then echo ""; fi
+}
+
+# --- Create Beads (optional) ---
+
+create_beads_for_findings() {
+  if [[ "$CREATE_BEADS" != true || ${#FINDINGS[@]} -eq 0 ]]; then
+    return
+  fi
+
+  if [[ "$JSON_OUTPUT" != true ]]; then
+    echo "[code-patrol] Creating beads for findings..."
+  fi
+
+  for entry in "${FINDINGS[@]}"; do
+    IFS='|' read -r check severity message detail <<< "$entry"
+    local title="[code-patrol] ${message}"
+    local body="Check: ${check}"$'\n'"Severity: ${severity}"
+    [[ -n "$detail" ]] && body="${body}"$'\n'"Detail: ${detail}"
+    body="${body}"$'\n'$'\n'"Detected by bin/code-patrol"
+
+    if command -v bd &> /dev/null; then
+      bd create --title="${title}" --type=task --priority=3 2>/dev/null && \
+        echo "  Created bead: ${title}" || \
+        echo "  Failed to create bead: ${title}" >&2
+    fi
+  done
+}
+
+# --- JSON Report ---
+
+json_report() {
+  if [[ "$JSON_OUTPUT" != true ]]; then
+    return
+  fi
+
+  local items=""
+  for entry in "${FINDINGS[@]}"; do
+    IFS='|' read -r check severity message detail <<< "$entry"
+    # Escape quotes for JSON
+    message="${message//\"/\\\"}"
+    detail="${detail//\"/\\\"}"
+    [[ -n "$items" ]] && items="${items},"
+    items="${items}{\"check\":\"${check}\",\"severity\":\"${severity}\",\"message\":\"${message}\",\"detail\":\"${detail}\"}"
+  done
+
+  echo "{\"findings\":[${items}],\"count\":${FINDING_COUNT}}"
+}
+
+# --- Main ---
+
+check_duplication
+check_dead_exports
+check_naming
+check_unbounded
+
+# --- Report ---
+
+if [[ "$JSON_OUTPUT" == true ]]; then
+  json_report
+else
+  echo "=========================================="
+  echo "[code-patrol] Results: ${FINDING_COUNT} finding(s)"
+  echo "=========================================="
+fi
+
+create_beads_for_findings
+
+if [[ "$FINDING_COUNT" -gt 0 ]]; then
+  exit 1
+fi
+
+exit 0
