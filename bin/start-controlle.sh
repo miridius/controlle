@@ -25,6 +25,10 @@ start_controlle() {
   # Clean stale runtime files from previous container
   rm -f "$PIDFILE" "$LOCKFILE"
   cd "$WORKDIR"
+  # Unset TMUX vars — the bot is a background daemon, not a tmux pane.
+  # If inherited, gt nudge uses the source pane to resolve targets, which
+  # breaks cross-session delivery (e.g. crew/sam pane → mayor session).
+  unset TMUX TMUX_PANE
   nohup bun run --watch src/index.ts > "${RUNTIME}/controlle.log" 2>&1 &
   echo $! > "$PIDFILE"
 }
