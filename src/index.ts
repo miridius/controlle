@@ -13,7 +13,7 @@
 import { mkdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { createBot } from "./telegram";
-import { startAgentLogWatcher } from "./agent-log-watcher";
+import { startAgentLogWatcher, stopAgentLogWatcher } from "./agent-log-watcher";
 import { reportError } from "./error-handler";
 
 // --- Single-instance lock via PID file ---
@@ -65,8 +65,8 @@ if (!acquireLock()) {
 }
 
 process.on("exit", releaseLock);
-process.on("SIGINT", () => { releaseLock(); process.exit(0); });
-process.on("SIGTERM", () => { releaseLock(); process.exit(0); });
+process.on("SIGINT", () => { stopAgentLogWatcher(); releaseLock(); process.exit(0); });
+process.on("SIGTERM", () => { stopAgentLogWatcher(); releaseLock(); process.exit(0); });
 
 // --- Uncaught exception / unhandled rejection handlers ---
 process.on("uncaughtException", (err) => {

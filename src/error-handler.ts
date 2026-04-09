@@ -32,9 +32,17 @@ function effectiveSeverity(source: string, base: Severity): Severity {
   if (base === "critical") return "critical";
 
   const now = Date.now();
+
+  // Prune stale entries to prevent unbounded map growth
+  for (const [key, val] of errorCounts) {
+    if (now - val.firstSeen >= WINDOW_MS) {
+      errorCounts.delete(key);
+    }
+  }
+
   const entry = errorCounts.get(source);
 
-  if (entry && now - entry.firstSeen < WINDOW_MS) {
+  if (entry) {
     entry.count++;
     if (entry.count >= REPEAT_THRESHOLD) {
       return "high";

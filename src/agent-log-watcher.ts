@@ -151,8 +151,22 @@ async function pollChannel(channel: {
   }
 }
 
+let pollIntervalHandle: ReturnType<typeof setInterval> | null = null;
+
+/** Stop the agent-log watcher loop */
+export function stopAgentLogWatcher(): void {
+  if (pollIntervalHandle !== null) {
+    clearInterval(pollIntervalHandle);
+    pollIntervalHandle = null;
+    console.log("[agent-log] Watcher stopped.");
+  }
+}
+
 /** Start the agent-log watcher loop */
 export function startAgentLogWatcher(): void {
+  // Clear any existing interval to prevent duplicate poll loops on restart
+  stopAgentLogWatcher();
+
   const channels = agentLogChannels();
   if (channels.length === 0) {
     console.log("[agent-log] No channels with agent_log enabled, skipping.");
@@ -163,7 +177,7 @@ export function startAgentLogWatcher(): void {
     `[agent-log] Watching ${channels.length} channel(s): ${channels.map((c) => c.label).join(", ")}`,
   );
 
-  setInterval(async () => {
+  pollIntervalHandle = setInterval(async () => {
     for (const channel of channels) {
       try {
         await pollChannel(channel);

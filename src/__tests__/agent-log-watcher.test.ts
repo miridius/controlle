@@ -1,8 +1,8 @@
 /**
- * Tests for agent-log-watcher.ts: extractAssistantText, truncate.
+ * Tests for agent-log-watcher.ts: extractAssistantText, truncate, lifecycle.
  */
-import { describe, expect, test } from "bun:test";
-import { extractAssistantText, truncate } from "../agent-log-watcher";
+import { describe, expect, test, afterEach } from "bun:test";
+import { extractAssistantText, truncate, startAgentLogWatcher, stopAgentLogWatcher } from "../agent-log-watcher";
 
 describe("extractAssistantText", () => {
   test("extracts text from assistant message event", () => {
@@ -112,5 +112,22 @@ describe("truncate", () => {
     const text = "important data " + "x".repeat(5000);
     const result = truncate(text, 100);
     expect(result).toStartWith("important data ");
+  });
+});
+
+describe("stopAgentLogWatcher", () => {
+  afterEach(() => {
+    stopAgentLogWatcher();
+  });
+
+  test("does not throw when called with no active watcher", () => {
+    expect(() => stopAgentLogWatcher()).not.toThrow();
+  });
+
+  test("can be called multiple times safely", () => {
+    stopAgentLogWatcher();
+    stopAgentLogWatcher();
+    stopAgentLogWatcher();
+    // No throw = pass
   });
 });
