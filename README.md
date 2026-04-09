@@ -4,12 +4,14 @@ Four-channel Telegram gateway bridging human operators with Gas Town agents.
 
 ## Channels
 
-| # | Channel | Direction | Mechanism |
-|---|---------|-----------|-----------|
-| 1 | Bot DM (Mayor) | In: human → `gt nudge` mayor | Out: agent-log → DM |
-| 2 | Escalations Group | In: emoji reactions → `gt escalate ack/close` | Out: escalation alerts |
-| 3 | Mail Inbox Group | In: reply-to → `gt mail reply` | Out: `--human` mail forwarded |
-| 4 | Crew Chat Groups | In: human → `gt nudge` crew session | Out: agent-log → group |
+All channels are forum topics within a single Telegram supergroup.
+
+| # | Topic | Direction | Mechanism |
+|---|-------|-----------|-----------|
+| 1 | Mayor | In: human → `gt nudge` mayor | Out: agent-log → topic |
+| 2 | Escalations | In: emoji reactions → `gt escalate ack/close` | Out: escalation alerts |
+| 3 | Mail Inbox | In: reply-to → `gt mail reply` | Out: `--human` mail forwarded |
+| 4 | Crew topics | In: human → `gt nudge` crew session | Out: agent-log → topic |
 
 ## Setup
 
@@ -45,15 +47,15 @@ bun run outbound -- send <chat_id> "Hello"
 src/
 ├── index.ts              Entry point (long polling + agent-log watcher)
 ├── config.ts             Gateway config loader + channel routing
-├── telegram.ts           grammY bot setup, inbound routing by chat_id
+├── telegram.ts           grammY bot setup, inbound routing by thread_id
 ├── exec.ts               Shell command helper (gt nudge, gt mail, etc.)
 ├── log.ts                Gateway event logging
 ├── outbound.ts           Bot API outbound send (escalations, mail, streaming)
 ├── outbound-cli.ts       CLI for GT hooks to send to Telegram
 ├── agent-log-watcher.ts  Watches Claude JSONL transcripts → Telegram
+├── markdown.ts           GFM → Telegram HTML conversion
 └── channels/
-    ├── mayor-dm.ts       Channel 1: Mayor direct line
-    ├── escalations.ts    Channel 2: Escalation alerts + reaction handling
-    ├── mail-inbox.ts     Channel 3: Mail inbox + reply routing
-    └── crew.ts           Channel 4: Crew chat groups
+    ├── agent.ts          Generic agent topic handler (mayor + crew)
+    ├── escalations.ts    Escalation alerts + reaction handling
+    └── mail-inbox.ts     Mail inbox + reply routing
 ```
