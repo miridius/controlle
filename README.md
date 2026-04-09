@@ -1,5 +1,13 @@
 # Controlle — Gas Town Telegram Gateway
 
+> **Warning:** This project was entirely vibe-coded by AI agents. No human has
+> reviewed the actual code — only the end-to-end functionality has been verified
+> by a human operator. It likely contains bugs, edge cases, and questionable
+> decisions. **Use at your own risk.**
+>
+> We recommend deploying Controlle as a Gas Town rig (see [Deployment](#deployment))
+> so your agents can audit, fix, and enhance it in place.
+
 Telegram gateway bridging human operators with Gas Town agents via forum
 topics in a single supergroup. Three channel types:
 
