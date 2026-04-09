@@ -14,64 +14,74 @@ All channels are forum topics within a single Telegram supergroup.
 
 - [Bun](https://bun.sh) runtime
 - [Gas Town](https://github.com/anthropics/gastown) (`gt` CLI on PATH)
-- A Telegram bot token (from [@BotFather](https://t.me/BotFather))
-- A Telegram supergroup with **Topics enabled** (Group Settings → Topics)
-- The bot must be added to the supergroup as an **admin** with permission to
-  manage topics and send messages
+- A Telegram bot token (from BotFather — the human sets this up)
+- A Telegram supergroup with **Topics enabled**, bot added as admin
 
 ## Setup
 
-### 1. Create the Telegram supergroup
+The human creates the bot and supergroup beforehand. An agent (typically the
+mayor) handles the rest.
 
-1. Create a supergroup in Telegram
-2. Enable **Topics** in group settings
-3. Add your bot as an admin
-4. Create forum topics for each channel you need (e.g. "mayor",
-   "escalations", "mail_inbox", one per crew member)
-
-### 2. Get your IDs
-
-**Supergroup chat ID:** Send a message in the group, then call:
+### 1. Install and configure credentials
 
 ```bash
-curl "https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates" | jq '.result[-1].message.chat.id'
-```
-
-**Topic thread IDs:** Each forum topic has a `message_thread_id`. Send a
-message in a topic and inspect `getUpdates` output, or use the bot's
-`/status` command inside a topic.
-
-### 3. Configure
-
-```bash
-cp .env.example .env   # Set TELEGRAM_BOT_TOKEN
+cd /path/to/controlle
+cp .env.example .env
 bun install
 ```
 
-Edit `gateway.config.json` to map your supergroup and topics:
+Set `TELEGRAM_BOT_TOKEN` in `.env`.
+
+### 2. Discover your supergroup
+
+```bash
+# Get the supergroup chat_id (bot must already be a member)
+curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates" \
+  | jq '[.result[].message.chat | select(.type == "supergroup")] | unique_by(.id) | .[] | {id, title}'
+```
+
+### 3. Create forum topics via API
+
+```bash
+TOKEN="$TELEGRAM_BOT_TOKEN"
+CHAT_ID="-100XXXXXXXXXX"  # From step 2
+
+# Create each topic and capture the thread_id from the response
+curl -s -X POST "https://api.telegram.org/bot${TOKEN}/createForumTopic" \
+  -H "Content-Type: application/json" \
+  -d "{\"chat_id\": ${CHAT_ID}, \"name\": \"mayor\"}" \
+  | jq '.result.message_thread_id'
+
+curl -s -X POST "https://api.telegram.org/bot${TOKEN}/createForumTopic" \
+  -H "Content-Type: application/json" \
+  -d "{\"chat_id\": ${CHAT_ID}, \"name\": \"escalations\"}" \
+  | jq '.result.message_thread_id'
+
+curl -s -X POST "https://api.telegram.org/bot${TOKEN}/createForumTopic" \
+  -H "Content-Type: application/json" \
+  -d "{\"chat_id\": ${CHAT_ID}, \"name\": \"mail_inbox\"}" \
+  | jq '.result.message_thread_id'
+```
+
+### 4. Write `gateway.config.json`
+
+Map the thread IDs from step 3 to your GT sessions:
 
 ```jsonc
 {
-  "supergroup_chat_id": -100XXXXXXXXXX,   // Your supergroup ID
+  "supergroup_chat_id": -100XXXXXXXXXX,
   "topics": {
     "mayor": {
-      "thread_id": 7,          // Thread ID from step 2
-      "session": "hq-mayor",   // GT session name (tmux session ID)
-      "agent_log": true,       // Stream Claude transcripts to this topic
-      "project_dir": "-gt-mayor"  // Claude projects dir name for JSONL resolution
+      "thread_id": 7,             // from createForumTopic response
+      "session": "hq-mayor",      // GT session name (tmux session ID)
+      "agent_log": true,          // stream Claude transcripts to this topic
+      "project_dir": "-gt-mayor"  // ~/.claude/projects/<this> for JSONL resolution
     },
     "escalations": {
-      "thread_id": 8           // No session — outbound-only (reactions route inbound)
+      "thread_id": 8              // outbound-only; reactions route inbound
     },
     "mail_inbox": {
-      "thread_id": 9           // No session — reply-to routing handles inbound
-    },
-    "crew/sam": {
-      "thread_id": 10,
-      "session": "co-crew-sam",
-      "rig": "controlle",      // Rig name — enables auto-start on inbound message
-      "agent_log": true,
-      "project_dir": "-gt-controlle-crew-sam"
+      "thread_id": 9              // reply-to routing handles inbound
     }
   }
 }
@@ -82,12 +92,12 @@ Edit `gateway.config.json` to map your supergroup and topics:
 | Field | Required | Description |
 |-------|----------|-------------|
 | `thread_id` | yes | Telegram forum topic thread ID |
-| `session` | for agents | GT session name (used for `gt nudge`) |
+| `session` | for agents | GT session name (target for `gt nudge`) |
 | `agent_log` | no | Stream Claude JSONL transcripts to this topic |
-| `project_dir` | no | Claude projects directory name (under `~/.claude/projects/`) for JSONL file resolution. Required if `agent_log` is true. |
-| `rig` | no | Gas Town rig name. When set, Controlle auto-starts the crew session via `gt crew start <rig> <name>` if the tmux session is dead when a message arrives. |
+| `project_dir` | if `agent_log` | Directory name under `~/.claude/projects/` for JSONL file resolution |
+| `rig` | no | Gas Town rig name. Enables auto-start: when a message arrives and the tmux session is dead, Controlle runs `gt crew start <rig> <name> --resume` |
 
-### 4. Run
+### 5. Start
 
 ```bash
 bun run dev    # Long polling with --watch (development)
@@ -96,24 +106,25 @@ bun run start  # Long polling (production)
 
 ## Adding crew members
 
-The `bin/add-crew` script automates topic creation, config update, and hook
-installation for new crew members:
+Use `bin/add-crew` to automate topic creation, config update, and hook
+installation:
 
 ```bash
-bin/add-crew emma                              # defaults: rig=controlle
+bin/add-crew sam                                # defaults: rig=controlle
 bin/add-crew alan --rig meerkat --session mk-crew-alan
 ```
 
-This creates the Telegram topic, adds the config entry, and installs
-`SessionStart` hooks so Controlle starts automatically with the agent session.
+This calls the Telegram API to create the forum topic, adds the entry to
+`gateway.config.json`, and installs `SessionStart` hooks + `tg-ack` in the
+crew member's working directory.
 
 ## Hook integration
 
-Controlle is designed to run as a `SessionStart` hook so it starts alongside
-agent sessions. The `bin/start-controlle.sh` script handles single-instance
-locking (only one bot process, avoiding Telegram 409 conflicts).
+Controlle runs as a `SessionStart` hook so it starts alongside any agent
+session. `bin/start-controlle.sh` handles single-instance locking (prevents
+duplicate bots and Telegram 409 conflicts).
 
-Install it via Claude Code settings:
+Add to the agent's `.claude/settings.json`:
 
 ```json
 {
