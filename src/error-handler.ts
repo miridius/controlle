@@ -16,6 +16,7 @@
 import { send } from "./outbound";
 import { gateway, resolveSessionForSource } from "./config";
 import { exec } from "./exec";
+import { escapeHtml, severityIcon } from "./utils";
 
 type Severity = "medium" | "high" | "critical";
 
@@ -23,17 +24,6 @@ type Severity = "medium" | "high" | "critical";
 const errorCounts = new Map<string, { count: number; firstSeen: number }>();
 const WINDOW_MS = 60_000; // 1 minute window
 const REPEAT_THRESHOLD = 3; // escalate to "high" after 3 errors in window
-
-function severityIcon(severity: Severity): string {
-  switch (severity) {
-    case "critical":
-      return "🔴";
-    case "high":
-      return "🟠";
-    case "medium":
-      return "🟡";
-  }
-}
 
 /**
  * Determine effective severity, upgrading to "high" if errors are repeating.
@@ -200,9 +190,3 @@ export async function reportErrorDirect(
   }
 }
 
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}

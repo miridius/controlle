@@ -13,6 +13,7 @@
 import { env, gateway } from "./config";
 import { persistMailMapping, persistEscalationMapping } from "./msg-map";
 import { reportErrorDirect } from "./error-handler";
+import { escapeHtml, severityIcon } from "./utils";
 
 const TELEGRAM_API = `https://api.telegram.org/bot${env.telegramBotToken}`;
 const SUPERGROUP_CHAT_ID = gateway.supergroup_chat_id;
@@ -64,14 +65,7 @@ async function main(): Promise<void> {
         );
         process.exit(1);
       }
-      const icon =
-        severity === "critical"
-          ? "🔴"
-          : severity === "high"
-            ? "🟠"
-            : severity === "medium"
-              ? "🟡"
-              : "🔵";
+      const icon = severityIcon(severity);
       const text = [
         `${icon} <b>Escalation [${severity.toUpperCase()}]</b>`,
         `<b>ID:</b> <code>${id}</code>`,
@@ -145,13 +139,6 @@ async function main(): Promise<void> {
       );
       process.exit(1);
   }
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
 }
 
 main().catch(async (err) => {

@@ -10,6 +10,7 @@ import { trackEscalation } from "./channels/escalations";
 import { trackMailMessage } from "./channels/mail-inbox";
 import { supergroupChatId } from "./config";
 import { gfmToTelegramHtml } from "./markdown";
+import { escapeHtml, severityIcon } from "./utils";
 
 let botApi: Api | null = null;
 
@@ -81,14 +82,7 @@ export async function sendEscalation(
   description: string,
   source?: string,
 ): Promise<number> {
-  const icon =
-    severity === "critical"
-      ? "🔴"
-      : severity === "high"
-        ? "🟠"
-        : severity === "medium"
-          ? "🟡"
-          : "🔵";
+  const icon = severityIcon(severity);
 
   const text = [
     `${icon} <b>Escalation [${severity.toUpperCase()}]</b>`,
@@ -136,13 +130,6 @@ export async function sendMailMessage(
     parseMode: "HTML",
   });
   return result.messageId;
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
 }
 
 /**

@@ -4,11 +4,7 @@
  * Handles: code blocks, inline code, bold, italic, strikethrough, links.
  * Falls back gracefully — unrecognised patterns pass through as escaped text.
  */
-
-/** Escape characters that are special in Telegram HTML */
-function esc(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
+import { escapeHtml as esc } from "./utils";
 
 /** Convert inline GFM formatting to Telegram HTML (called on non-code text) */
 function convertInline(text: string): string {
