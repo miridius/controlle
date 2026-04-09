@@ -1,14 +1,13 @@
 # Controlle — Gas Town Telegram Gateway
 
-Four-channel Telegram gateway bridging human operators with Gas Town agents.
-All channels are forum topics within a single Telegram supergroup.
+Telegram gateway bridging human operators with Gas Town agents via forum
+topics in a single supergroup. Three channel types:
 
-| # | Topic | Direction | Mechanism |
-|---|-------|-----------|-----------|
-| 1 | Mayor | In: human → `gt nudge` mayor | Out: agent-log → topic |
-| 2 | Escalations | In: emoji reactions → `gt escalate ack/close` | Out: escalation alerts |
-| 3 | Mail Inbox | In: reply-to → `gt mail reply` | Out: `--human` mail forwarded |
-| 4 | Crew topics | In: human → `gt nudge` crew session | Out: agent-log → topic |
+| Channel type | Topics | Direction | Mechanism |
+|--------------|--------|-----------|-----------|
+| Agent | Mayor, crew members | In: human → `gt nudge` session | Out: agent-log → topic |
+| Escalations | 1 shared topic | In: emoji reactions → `gt escalate ack/close` | Out: escalation alerts |
+| Mail Inbox | 1 shared topic | In: reply-to → `gt mail reply` | Out: `--human` mail forwarded |
 
 ## Prerequisites
 
