@@ -14,6 +14,7 @@ import { agentLogChannels } from "./config";
 import { reportError } from "./error-handler";
 
 const POLL_INTERVAL_MS = 2000;
+const POLL_TIMEOUT_MS = 5000;
 interface WatchState {
   filePath: string;
   offset: number;
@@ -143,6 +144,15 @@ async function pollChannel(channel: {
   }
 }
 
+/** Race a promise against a timeout. Rejects with an error if the timeout fires first. */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Timeout after ${ms}ms: ${label}`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 let pollIntervalHandle: ReturnType<typeof setInterval> | null = null;
 
 /** Stop the agent-log watcher loop */
@@ -159,10 +169,11 @@ export function startAgentLogWatcher(): void {
   // Clear any existing interval to prevent duplicate poll loops on restart
   stopAgentLogWatcher();
 
+
   const channels = agentLogChannels();
   if (channels.length === 0) {
     console.log("[agent-log] No channels with agent_log enabled, skipping.");
-    return;
+    return undefined;
   }
 
   console.log(
@@ -170,12 +181,19 @@ export function startAgentLogWatcher(): void {
   );
 
   pollIntervalHandle = setInterval(async () => {
+    const start = Date.now();
     for (const channel of channels) {
       try {
-        await pollChannel(channel);
+        await withTimeout(
+          pollChannel(channel),
+          POLL_TIMEOUT_MS,
+          `pollChannel(${channel.label})`,
+        );
       } catch (err) {
         reportError(`agent-log/poll/${channel.label}`, err);
       }
     }
+    const elapsed = Date.now() - start;
+    console.log(`[agent-log] Poll cycle complete: ${channels.length} channel(s) in ${elapsed}ms`);
   }, POLL_INTERVAL_MS);
 }

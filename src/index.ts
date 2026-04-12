@@ -64,9 +64,19 @@ if (!acquireLock()) {
   process.exit(1);
 }
 
+/** Registered cleanup functions called on shutdown */
+const shutdownCallbacks: (() => void)[] = [releaseLock];
+
+function shutdown(): void {
+  for (const cb of shutdownCallbacks) {
+    try { cb(); } catch { /* best-effort */ }
+  }
+  process.exit(0);
+}
+
 process.on("exit", releaseLock);
-process.on("SIGINT", () => { stopAgentLogWatcher(); releaseLock(); process.exit(0); });
-process.on("SIGTERM", () => { stopAgentLogWatcher(); releaseLock(); process.exit(0); });
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
 
 // --- Uncaught exception / unhandled rejection handlers ---
 process.on("uncaughtException", (err) => {
@@ -80,6 +90,7 @@ const bot = createBot();
 
 // Start agent-log watchers for outbound streaming
 startAgentLogWatcher();
+shutdownCallbacks.push(stopAgentLogWatcher);
 
 // Start bot in long polling mode
 console.log("[gateway] Starting Gas Town Telegram gateway...");
