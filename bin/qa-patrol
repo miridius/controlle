@@ -4,10 +4,11 @@ set -euo pipefail
 #
 # Checks:
 #   1. Test suite (bun test)
-#   2. Mutation score (stryker) — optional, slow
-#   3. Controlle process is running
-#   4. Telegram API reachable for all configured topics
-#   5. Nudge delivery works for each configured session
+#   2. Coverage gate (changed files >= 80% line coverage)
+#   3. Mutation score (stryker) — optional, slow
+#   4. Controlle process is running
+#   5. Telegram API reachable for all configured topics
+#   6. Nudge delivery works for each configured session
 #
 # Usage:
 #   bin/qa-patrol                  # Run all checks (skip mutation)
@@ -58,7 +59,20 @@ if [[ "$QUICK" != true ]]; then
   echo ""
 fi
 
-# --- Check 2: Mutation score (optional) ---
+# --- Check 2: Coverage gate ---
+
+if [[ "$QUICK" != true ]]; then
+  echo "[qa-patrol] Running coverage gate..."
+  cd "$REPO_DIR"
+  if bin/coverage-gate 2>&1; then
+    pass "Coverage gate"
+  else
+    fail "Coverage gate: changed files below 80% line coverage"
+  fi
+  echo ""
+fi
+
+# --- Check 3: Mutation score (optional) ---
 
 if [[ "$WITH_MUTATION" == true && "$QUICK" != true ]]; then
   echo "[qa-patrol] Running mutation testing (this takes a while)..."
@@ -93,7 +107,7 @@ if [[ "$WITH_MUTATION" == true && "$QUICK" != true ]]; then
   echo ""
 fi
 
-# --- Check 3: Controlle process is running ---
+# --- Check 4: Controlle process is running ---
 
 echo "[qa-patrol] Checking Controlle process..."
 
@@ -117,7 +131,7 @@ else
 fi
 echo ""
 
-# --- Check 4: Telegram API reachable for configured topics ---
+# --- Check 5: Telegram API reachable for configured topics ---
 
 echo "[qa-patrol] Checking Telegram API connectivity..."
 
@@ -162,7 +176,7 @@ else
 fi
 echo ""
 
-# --- Check 5: Nudge delivery (verify gt nudge is available) ---
+# --- Check 6: Nudge delivery (verify gt nudge is available) ---
 
 if [[ "$QUICK" != true ]]; then
   echo "[qa-patrol] Checking nudge delivery capability..."
