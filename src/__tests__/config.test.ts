@@ -11,6 +11,7 @@ import {
   gateway,
   env,
   supergroupChatId,
+  resolveSessionForSource,
 } from "../config";
 
 describe("env", () => {
@@ -151,5 +152,47 @@ describe("agentLogChannels", () => {
         expect(found!.projectDir).toBe(ch.project_dir);
       }
     }
+  });
+});
+
+describe("resolveSessionForSource", () => {
+  test("returns session for direct topic label match", () => {
+    expect(resolveSessionForSource("mayor")).toBe("hq-mayor");
+  });
+
+  test("returns session for nested topic label (crew/sam)", () => {
+    expect(resolveSessionForSource("crew/sam")).toBe("co-crew-sam");
+  });
+
+  test("strips agent-log/ prefix and matches topic", () => {
+    expect(resolveSessionForSource("agent-log/mayor")).toBe("hq-mayor");
+  });
+
+  test("strips agent-log/poll/ prefix and matches topic", () => {
+    expect(resolveSessionForSource("agent-log/poll/mayor")).toBe("hq-mayor");
+  });
+
+  test("strips agent-log/poll/ prefix for nested topic", () => {
+    expect(resolveSessionForSource("agent-log/poll/crew/sam")).toBe("co-crew-sam");
+  });
+
+  test("strips agent-log/ prefix for nested topic", () => {
+    expect(resolveSessionForSource("agent-log/crew/sam")).toBe("co-crew-sam");
+  });
+
+  test("returns undefined for unknown source", () => {
+    expect(resolveSessionForSource("unknown-topic")).toBeUndefined();
+  });
+
+  test("returns undefined for topic without session (escalations)", () => {
+    expect(resolveSessionForSource("escalations")).toBeUndefined();
+  });
+
+  test("returns undefined for prefixed source without session", () => {
+    expect(resolveSessionForSource("agent-log/escalations")).toBeUndefined();
+  });
+
+  test("returns undefined for empty string", () => {
+    expect(resolveSessionForSource("")).toBeUndefined();
   });
 });
