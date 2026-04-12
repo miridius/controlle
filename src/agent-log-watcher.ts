@@ -16,7 +16,8 @@ import { recordPoll } from "./health";
 
 const POLL_INTERVAL_MS = 2000;
 const POLL_TIMEOUT_MS = 5000;
-interface WatchState {
+
+export interface WatchState {
   filePath: string;
   offset: number;
 }
@@ -25,7 +26,7 @@ interface WatchState {
 const watchers = new Map<string, WatchState>();
 
 /** Find the most recent JSONL file for a Claude session in a specific project dir */
-async function findSessionJsonl(
+export async function findSessionJsonl(
   session: string,
   projectDir?: string,
 ): Promise<string | null> {
@@ -67,7 +68,7 @@ async function listProjectDirs(claudeDir: string): Promise<string[] | null> {
 }
 
 /** Read new lines from a JSONL file since last offset */
-async function readNewLines(state: WatchState): Promise<string[]> {
+export async function readNewLines(state: WatchState): Promise<string[]> {
   try {
     const st = await stat(state.filePath);
     if (st.size <= state.offset) return [];
@@ -109,7 +110,7 @@ export function extractAssistantText(line: string): string | null {
 }
 
 /** Poll loop for a single channel */
-async function pollChannel(channel: {
+export async function pollChannel(channel: {
   threadId: number;
   session: string;
   projectDir: string | undefined;
