@@ -8,9 +8,10 @@
  *   4. Crew topics → crew member nudges (one topic per crew member)
  *
  * Runs in long polling mode (production-ready for single-instance deployment).
- * Uses flock-based locking to prevent duplicate bot instances (409 Conflict).
+ * Uses PID + mtime locking to prevent duplicate bot instances (409 Conflict).
+ * Stale locks (> 5 min) are automatically reclaimed to handle SIGKILL/OOM/Docker restarts.
  */
-import { mkdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, unlinkSync, statSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { createBot } from "./telegram";
 import { startAgentLogWatcher, stopAgentLogWatcher } from "./agent-log-watcher";
@@ -22,6 +23,31 @@ import { reportError } from "./error-handler";
 const RUNTIME_DIR = process.env.RUNTIME_DIR || join(dirname(import.meta.dir), ".runtime");
 const LOCK_FILE = join(RUNTIME_DIR, "controlle.lock");
 
+// Lock staleness threshold: if the lock file is older than this, assume the
+// holder is gone (PID may have been reused by an unrelated process after a
+// Docker restart or OOM kill). 5 minutes is conservative — the bot writes the
+// lock once at startup and never touches it again, so any mtime is from the
+// original acquirer.
+const STALE_LOCK_MS = 5 * 60 * 1000;
+
+function isLockStale(): boolean {
+  try {
+    const st = statSync(LOCK_FILE);
+    return Date.now() - st.mtimeMs > STALE_LOCK_MS;
+  } catch {
+    return true; // Can't stat → treat as stale / nonexistent
+  }
+}
+
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function acquireLock(): boolean {
   try {
     mkdirSync(RUNTIME_DIR, { recursive: true });
@@ -30,11 +56,24 @@ function acquireLock(): boolean {
       if (existing) {
         const pid = parseInt(existing, 10);
         if (!isNaN(pid) && pid !== process.pid) {
-          try {
-            process.kill(pid, 0); // Check if process is alive (signal 0)
-            return false; // Another instance is running
-          } catch {
-            // Process is dead, stale lock — take over
+          const alive = isPidAlive(pid);
+          const stale = isLockStale();
+
+          if (stale) {
+            // Lock is old — previous holder likely died (SIGKILL, OOM, Docker
+            // restart). Even if the PID is technically alive it's probably a
+            // different process that reused the number.
+            console.warn(
+              `[gateway] Stale lock found (pid=${pid}, alive=${alive}). Taking over.`,
+            );
+          } else if (alive) {
+            // Lock is fresh and the PID is still running — legitimate duplicate.
+            return false;
+          } else {
+            // Lock is recent but PID is dead — crashed moments ago.
+            console.warn(
+              `[gateway] Dead process lock (pid=${pid}). Taking over.`,
+            );
           }
         }
       }
