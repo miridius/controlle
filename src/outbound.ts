@@ -12,6 +12,7 @@ import { supergroupChatId } from "./config";
 import { gfmToTelegramHtml, truncateHtml } from "./markdown";
 import { escapeHtml, severityIcon } from "./utils";
 import { telegramLimiter } from "./rate-limiter";
+import { recordOutbound } from "./health";
 
 let botApi: Api | null = null;
 
@@ -76,6 +77,7 @@ export async function send(
     }
   });
 
+  recordOutbound();
   await log(opts.channel, "out", "bot", text.slice(0, 200));
 
   if (opts.escalationId) {

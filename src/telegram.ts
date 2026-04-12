@@ -14,6 +14,7 @@ import { handleEscalationReaction } from "./channels/escalations";
 import { handleMailInboxInbound } from "./channels/mail-inbox";
 import { setApi } from "./outbound";
 import { reportError } from "./error-handler";
+import { formatHealthReport, recordInbound } from "./health";
 
 /**
  * Dedup ring buffer: track recently seen Telegram update_ids to prevent
@@ -53,6 +54,13 @@ export function createBot(): Bot {
     await next();
   });
 
+  // --- /health command: show gateway liveness ---
+  bot.command("health", async (ctx) => {
+    await ctx.reply(formatHealthReport(), {
+      message_thread_id: ctx.message?.message_thread_id,
+    });
+  });
+
   // --- Inbound text messages: route by forum topic thread_id ---
   bot.on("message:text", async (ctx) => {
     const chatId = ctx.chat.id;
@@ -80,6 +88,8 @@ export function createBot(): Bot {
       );
       return;
     }
+
+    recordInbound();
 
     if (channel.isEscalations) {
       // Escalations topic is outbound-only for text; inbound is reactions

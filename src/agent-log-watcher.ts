@@ -12,6 +12,7 @@ import { homedir } from "node:os";
 import { sendWithMarkdownFallback } from "./outbound";
 import { agentLogChannels } from "./config";
 import { reportError } from "./error-handler";
+import { recordPoll } from "./health";
 
 const POLL_INTERVAL_MS = 2000;
 const POLL_TIMEOUT_MS = 5000;
@@ -193,6 +194,7 @@ export function startAgentLogWatcher(): void {
         reportError(`agent-log/poll/${channel.label}`, err);
       }
     }
+    recordPoll();
     const elapsed = Date.now() - start;
     console.log(`[agent-log] Poll cycle complete: ${channels.length} channel(s) in ${elapsed}ms`);
   }, POLL_INTERVAL_MS);

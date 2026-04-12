@@ -16,6 +16,7 @@ import { join, dirname } from "node:path";
 import { createBot } from "./telegram";
 import { startAgentLogWatcher, stopAgentLogWatcher } from "./agent-log-watcher";
 import { reportError } from "./error-handler";
+import { formatHeartbeat } from "./health";
 
 // --- Single-instance lock via PID file ---
 // Prevents watch mode or manual restarts from spawning duplicate bot processes
@@ -130,6 +131,12 @@ const bot = createBot();
 // Start agent-log watchers for outbound streaming
 startAgentLogWatcher();
 shutdownCallbacks.push(stopAgentLogWatcher);
+
+// Periodic heartbeat log (every 5 minutes)
+const HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000;
+setInterval(() => {
+  console.log(`[heartbeat] ${formatHeartbeat()}`);
+}, HEARTBEAT_INTERVAL_MS);
 
 // Start bot in long polling mode
 console.log("[gateway] Starting Gas Town Telegram gateway...");

@@ -262,3 +262,34 @@ When a human sends a message in an agent's forum topic:
 3. **On failed delivery** (after retry exhaustion): replace reaction with 😢 (failure) and post a brief error message as a reply to the original message
 
 This ensures the human operator always knows the delivery status of their message. Silent failures — where the bot appears to ignore a message — are not acceptable.
+
+## REQ-20: Health Check
+
+**Gateway MUST expose a health check mechanism that detects frozen poll loops and stalled long polling.**
+
+### `/health` Bot Command
+
+**When** a user sends `/health` in any topic:
+
+1. Report gateway uptime (human-readable: e.g. "2h 15m 30s")
+2. Report last agent-log poll time (seconds ago, or "never" if no poll has run)
+3. Report message counts for the last 5 minutes (inbound and outbound)
+4. Report total message counts since startup
+5. Report the gateway process PID
+
+### Periodic Heartbeat Log
+
+Every 5 minutes, log a heartbeat line to console:
+
+```
+[heartbeat] gateway alive — uptime 2h 15m 30s, 3 in / 12 out (last 5m), last poll 2s ago
+```
+
+This provides an observable liveness signal in logs. If heartbeats stop appearing,
+the gateway process is frozen or dead.
+
+### Message Counting
+
+- **Inbound**: incremented when a routed message is received (after channel resolution)
+- **Outbound**: incremented when a message is sent via the `send()` function
+- **Recent window**: 5-minute rolling window for "last 5m" counts
