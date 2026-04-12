@@ -11,6 +11,7 @@ import { trackMailMessage } from "./channels/mail-inbox";
 import { supergroupChatId } from "./config";
 import { gfmToTelegramHtml, truncateHtml } from "./markdown";
 import { escapeHtml, severityIcon } from "./utils";
+import { telegramLimiter } from "./rate-limiter";
 
 let botApi: Api | null = null;
 
@@ -51,12 +52,28 @@ export async function send(
 
   const chatId = supergroupChatId();
 
-  const msg = await botApi.sendMessage(chatId, text, {
-    message_thread_id: threadId,
-    parse_mode: opts.parseMode,
-    link_preview_options: opts.disablePreview
-      ? { is_disabled: true }
-      : undefined,
+  const msg = await telegramLimiter.schedule(async () => {
+    try {
+      return await botApi!.sendMessage(chatId, text, {
+        message_thread_id: threadId,
+        parse_mode: opts.parseMode,
+        link_preview_options: opts.disablePreview
+          ? { is_disabled: true }
+          : undefined,
+      });
+    } catch (err) {
+      if (
+        err instanceof GrammyError &&
+        err.error_code === 429
+      ) {
+        const retryAfter =
+          (err.payload as Record<string, unknown>)?.retry_after;
+        if (typeof retryAfter === "number") {
+          telegramLimiter.notifyRetryAfter(retryAfter);
+        }
+      }
+      throw err;
+    }
   });
 
   await log(opts.channel, "out", "bot", text.slice(0, 200));
