@@ -247,6 +247,18 @@ describe("handleAgentInbound (crew)", () => {
     expect(stdin).toContain("<ack-cmd>bin/tg-ack 1</ack-cmd>");
   });
 
+  test("passes timeout >60s to gt nudge (covers gt nudge's wait-idle max)", async () => {
+    const ctx = createMockCtx();
+    await handleAgentInbound(ctx as never, "crew/sam", "co-crew-sam");
+
+    const call = getCall(0);
+    expect(call[1][0]).toBe("nudge");
+    // gt nudge default wait-idle is up to 60s; our timeout must exceed that
+    // so Node doesn't kill the child before gt nudge completes. See co-gbh.
+    const opts = call[2] as { timeout?: number };
+    expect(opts.timeout).toBeGreaterThan(60_000);
+  });
+
   test("reacts with pending then thumbs up on success", async () => {
     const ctx = createMockCtx();
     await handleAgentInbound(ctx as never, "crew/sam", "co-crew-sam");

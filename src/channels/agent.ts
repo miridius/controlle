@@ -103,8 +103,13 @@ export async function handleAgentInbound(
       await ensureCrewSession(label, session, rig);
     }
 
+    // Timeout must exceed `gt nudge`'s default wait-idle max (60s) so Node
+    // doesn't SIGTERM the child while gt is still waiting for the agent to
+    // idle. See co-gbh: a 30s default caused false "delivery failed" warnings
+    // when the agent was busy for >30s on a tool call.
     await execWithRetry("gt", ["nudge", session, "--stdin"], {
       stdin: wrapped,
+      timeout: 90_000,
     });
     await ctx.react("👍");
   } catch (err) {
